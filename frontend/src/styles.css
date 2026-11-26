@@ -134,9 +134,9 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .board-player-label { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:40px; padding:8px 12px; border:1px solid #2A3949; border-radius:8px; background:var(--surface); }
 .board-player-label strong { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .board-player-label span { flex:0 0 auto; color:var(--muted); font-size:12px; text-transform:uppercase; }
-.turn-indicator { display:inline-block; flex:0 0 9px; width:9px; height:9px; margin-right:7px; border-radius:50%; vertical-align:middle; background:#e06a5f; box-shadow:0 0 0 2px #e06a5f22; }
-.board-player-label .turn-indicator { flex:0 0 9px; margin-right:0; color:transparent; font-size:0; line-height:0; text-transform:none; }
-.turn-indicator.active { background:#73c78c; box-shadow:0 0 0 2px #73c78c33; animation:turn-indicator-pulse 1.2s ease-in-out infinite; }
+.turn-indicator { display:inline-block; flex:0 0 12px; width:12px; min-width:12px; height:12px; min-height:12px; margin-right:7px; border:1px solid #ffffffb3; border-radius:50%; vertical-align:middle; background:#e06a5f; box-shadow:0 0 0 3px #e06a5f44; }
+.board-player-label .turn-indicator { flex:0 0 12px; margin-right:0; color:transparent; font-size:0; line-height:0; text-transform:none; }
+.turn-indicator.active { background:#73c78c; box-shadow:0 0 0 3px #73c78c55; animation:turn-indicator-pulse 1.2s ease-in-out infinite; }
 .turn-indicator.waiting { animation:turn-indicator-waiting 1.6s ease-in-out infinite; }
 .turn-indicator.finished { background:#647482; box-shadow:none; }
 @keyframes turn-indicator-pulse { 50% { opacity:.35; box-shadow:0 0 0 5px #73c78c12; } }
