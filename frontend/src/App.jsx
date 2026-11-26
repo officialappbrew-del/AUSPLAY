@@ -214,12 +214,35 @@ function ForgotPasswordForm({ onModeChange }) {
   );
 }
 
-function PracticeRoomChat({ token, roomId }) {
+function mergeChatMessages(current, incoming) {
+  const messagesById = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) messagesById.set(message.id, message);
+  return [...messagesById.values()].sort((first, second) => first.id - second.id);
+}
+
+function PracticeRoomChat({ token, roomId, username }) {
   const [messages, setMessages] = useState([]);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState("");
-  const messagesEndRef = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const messagesContainerRef = useRef(null);
+  const messageInputRef = useRef(null);
+  const loadingOlderRef = useRef(false);
+  const lastMessageIdRef = useRef(0);
+  const oldestMessageIdRef = useRef(0);
+  const hasLoadedMessagesRef = useRef(false);
+  const shouldScrollToBottomRef = useRef(false);
+  const isOpenRef = useRef(isOpen);
+  isOpenRef.current = isOpen;
+
+  function isNearBottom() {
+    const container = messagesContainerRef.current;
+    return !container || container.scrollHeight - container.scrollTop - container.clientHeight < 48;
+  }
 
   useEffect(() => {
     let stopped = false;
@@ -230,13 +253,31 @@ function PracticeRoomChat({ token, roomId }) {
       try {
         const result = await api.getPracticeRoomChat(token, roomId);
         if (!stopped) {
-          setMessages((current) => {
-            const lastCurrentId = current[current.length - 1]?.id;
-            const lastReceivedId = result.messages[result.messages.length - 1]?.id;
-            return current.length === result.messages.length && lastCurrentId === lastReceivedId
-              ? current
-              : result.messages;
-          });
+          const newestMessageId = result.messages[result.messages.length - 1]?.id || 0;
+          if (!hasLoadedMessagesRef.current) {
+            hasLoadedMessagesRef.current = true;
+            oldestMessageIdRef.current = result.messages[0]?.id || 0;
+            setHasOlderMessages(Boolean(result.has_more));
+            if (isOpenRef.current) shouldScrollToBottomRef.current = true;
+          } else {
+            const incomingMessages = result.messages.filter(
+              (message) => message.id > lastMessageIdRef.current && message.username !== username,
+            );
+            if (incomingMessages.length) {
+              if (isOpenRef.current && isNearBottom()) {
+                shouldScrollToBottomRef.current = true;
+              } else {
+                setUnreadCount((count) => count + incomingMessages.length);
+              }
+            }
+            const firstLatestMessageId = result.messages[0]?.id;
+            if (firstLatestMessageId && firstLatestMessageId <= oldestMessageIdRef.current) {
+              setHasOlderMessages(Boolean(result.has_more));
+            }
+          }
+          lastMessageIdRef.current = Math.max(lastMessageIdRef.current, newestMessageId);
+          setHasOlderMessages(Boolean(result.has_more));
+          setMessages((current) => mergeChatMessages(current, result.messages));
           setError("");
         }
       } catch (err) {
@@ -252,11 +293,60 @@ function PracticeRoomChat({ token, roomId }) {
       stopped = true;
       window.clearInterval(interval);
     };
-  }, [token, roomId]);
+  }, [token, roomId, username]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (!shouldScrollToBottomRef.current || !messagesContainerRef.current) return;
+    shouldScrollToBottomRef.current = false;
+    messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
   }, [messages]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
+      messageInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isOpen]);
+
+  async function loadOlderMessages() {
+    if (!hasOlderMessages || loadingOlderRef.current || !messages.length) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    setError("");
+    const previousHeight = container.scrollHeight;
+    const previousTop = container.scrollTop;
+    try {
+      const result = await api.getPracticeRoomChat(token, roomId, messages[0].id);
+      if (result.messages.length) {
+        oldestMessageIdRef.current = result.messages[0].id;
+      }
+      setHasOlderMessages(Boolean(result.has_more));
+      setMessages((current) => mergeChatMessages(result.messages, current));
+      window.requestAnimationFrame(() => {
+        container.scrollTop = previousTop + container.scrollHeight - previousHeight;
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === "Escape") setIsOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isOpen]);
 
   async function sendMessage(event) {
     event.preventDefault();
@@ -266,7 +356,10 @@ function PracticeRoomChat({ token, roomId }) {
     setError("");
     try {
       const message = await api.sendPracticeRoomChat(token, roomId, content);
-      setMessages((current) => [...current, message].slice(-100));
+      lastMessageIdRef.current = Math.max(lastMessageIdRef.current, message.id);
+      shouldScrollToBottomRef.current = true;
+      setUnreadCount(0);
+      setMessages((current) => mergeChatMessages(current, [message]));
       setDraft("");
     } catch (err) {
       setError(err.message);
@@ -276,46 +369,97 @@ function PracticeRoomChat({ token, roomId }) {
   }
 
   return (
-    <div className="card chat-panel" aria-label="Match chat">
-      <h3>Chat with players</h3>
-      <div className="chat-messages" aria-live="polite" aria-relevant="additions">
-        {messages.length ? messages.map((message) => (
-          <div className="chat-message" key={message.id}>
-            <div className="chat-message-heading">
-              <strong><PlayerProfileLink username={message.username} /></strong>
-              <time dateTime={message.created_at}>
-                {new Date(message.created_at).toLocaleTimeString([], {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </time>
-            </div>
-            <p>{message.content}</p>
+    <div className="chat-dock">
+      {isOpen && (
+        <section className="card chat-panel" id={`match-chat-${roomId}`} aria-label="Match chat">
+          <div className="chat-panel-heading">
+            <h3>Chat with players</h3>
+            <button className="chat-close" type="button" onClick={() => setIsOpen(false)} aria-label="Close chat">
+              ×
+            </button>
           </div>
-        )) : (
-          <p className="empty-state">No messages yet. Say hello to the other players.</p>
+          <div
+            className="chat-messages"
+            ref={messagesContainerRef}
+            onScroll={(event) => {
+              if (event.currentTarget.scrollTop < 36) void loadOlderMessages();
+            }}
+            aria-live="polite"
+            aria-relevant="additions"
+          >
+            {loadingOlder && <p className="chat-history-status" role="status">Loading earlier messages...</p>}
+            {messages.length ? messages.map((message) => (
+              <div className="chat-message" key={message.id}>
+                <div className="chat-message-heading">
+                  <strong><PlayerProfileLink username={message.username} /></strong>
+                  <time dateTime={message.created_at}>
+                    {new Date(message.created_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </time>
+                </div>
+                <p>{message.content}</p>
+              </div>
+            )) : (
+              <p className="empty-state">No messages yet. Say hello to the other players.</p>
+            )}
+          </div>
+          {unreadCount > 0 && (
+            <button
+              className="chat-jump-latest"
+              type="button"
+              onClick={() => {
+                setUnreadCount(0);
+                if (messagesContainerRef.current) {
+                  messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+                }
+              }}
+            >
+              Jump to latest · {unreadCount} new
+            </button>
+          )}
+          {error && <p className="error" role="alert">{error}</p>}
+          <form className="chat-form" onSubmit={sendMessage}>
+            <input
+              ref={messageInputRef}
+              aria-label="Chat message"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              maxLength={500}
+              placeholder="Write a message..."
+              required
+            />
+            <ActionButton
+              className="btn"
+              type="submit"
+              disabled={!draft.trim()}
+              loading={sending}
+            >
+              Send
+            </ActionButton>
+          </form>
+        </section>
+      )}
+      <button
+        className={`chat-bell${unreadCount ? " has-unread" : ""}`}
+        type="button"
+        aria-label={unreadCount ? `Open match chat, ${unreadCount} new messages` : "Open match chat"}
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? `match-chat-${roomId}` : undefined}
+        onClick={() => {
+          if (!isOpen) setUnreadCount(0);
+          setIsOpen((open) => !open);
+        }}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+        </svg>
+        <span>Chat</span>
+        {unreadCount > 0 && (
+          <span className="chat-unread-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
         )}
-        <div ref={messagesEndRef} />
-      </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      <form className="chat-form" onSubmit={sendMessage}>
-        <input
-          aria-label="Chat message"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          maxLength={500}
-          placeholder="Write a message..."
-          required
-        />
-        <ActionButton
-          className="btn"
-          type="submit"
-          disabled={!draft.trim()}
-          loading={sending}
-        >
-          Send
-        </ActionButton>
-      </form>
+      </button>
     </div>
   );
 }
@@ -958,7 +1102,14 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
         {state.players.map((player) => (
           <div className={`card ludo-player ${player.color}`} key={player.user_id}>
             <div className="ludo-player-heading">
-              <h3><PlayerProfileLink username={players[player.color]} /></h3>
+              <h3>
+                <TurnIndicator
+                  playerName={players[player.color]}
+                  isTurn={player.user_id === state.turn_user_id}
+                  gameActive={state.status === "active"}
+                />
+                <PlayerProfileLink username={players[player.color]} />
+              </h3>
               <span>{player.color}{player.user_id === viewer.user_id ? " · You" : ""}</span>
             </div>
             <div className="ludo-tokens">
@@ -1007,10 +1158,41 @@ function PlayerProfileLink({ username, children }) {
   );
 }
 
-function BoardPlayerLabel({ name, username = name, side }) {
+function TurnIndicator({ playerName, isTurn, gameActive = true }) {
+  const state = !gameActive ? "finished" : isTurn ? "active" : "waiting";
+  const label = !gameActive
+    ? `${playerName}: game finished`
+    : isTurn
+      ? `${playerName}: to move`
+      : `${playerName}: waiting`;
+  return <span className={`turn-indicator ${state}`} role="img" aria-label={label} title={label} />;
+}
+
+function GameOrientationToggle({ orientation, onChange }) {
+  return (
+    <div className="orientation-toggle" role="group" aria-label="Game view orientation">
+      {["portrait", "landscape"].map((view) => (
+        <button
+          className={orientation === view ? "selected" : ""}
+          key={view}
+          type="button"
+          aria-pressed={orientation === view}
+          onClick={() => onChange(view)}
+        >
+          {view === "portrait" ? "Portrait" : "Landscape"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BoardPlayerLabel({ name, username = name, side, isTurn, gameActive = true }) {
   return (
     <div className="board-player-label">
-      <strong><PlayerProfileLink username={username}>{name}</PlayerProfileLink></strong>
+      <strong>
+        <TurnIndicator playerName={name} isTurn={isTurn} gameActive={gameActive} />
+        <PlayerProfileLink username={username}>{name}</PlayerProfileLink>
+      </strong>
       <span>{side}</span>
     </div>
   );
@@ -1043,6 +1225,8 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
           name={game.player_display_names?.black || players.black}
           username={players.black}
           side="Black"
+          isTurn={state.turn_user_id === state.black_player_id}
+          gameActive={state.status === "active"}
         />
         <div className="chess-board" role="grid" aria-label="Chess board">
           {state.board.flatMap((row, y) => row.map((piece, x) => {
@@ -1074,6 +1258,8 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
           name={game.player_display_names?.white || players.white}
           username={players.white}
           side="White"
+          isTurn={state.turn_user_id === state.white_player_id}
+          gameActive={state.status === "active"}
         />
       </div>
       <div className="game-info card">
@@ -1149,6 +1335,11 @@ function GolfScorecard({ game, onSubmitScore, actionPending }) {
                 return (
                   <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={golfer.user_id}>
                     <th scope="row">
+                      <TurnIndicator
+                        playerName={players[golfer.user_id]}
+                        isTurn={isOnTurn}
+                        gameActive={state.status === "active"}
+                      />
                       <PlayerProfileLink username={players[golfer.user_id]} />
                       {golfer.user_id === viewer.user_id ? " (you)" : ""}
                     </th>
@@ -1249,6 +1440,11 @@ function PoloScorecard({ game, onSubmitScore, actionPending }) {
                 return (
                   <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={team.user_id}>
                     <th scope="row">
+                      <TurnIndicator
+                        playerName={players[team.user_id]}
+                        isTurn={isOnTurn}
+                        gameActive={state.status === "active"}
+                      />
                       Team {index === 0 ? "A" : "B"} · <PlayerProfileLink username={players[team.user_id]} />
                       {team.user_id === viewer.user_id ? " (you)" : ""}
                     </th>
@@ -1355,6 +1551,11 @@ function SnookerScorecard({ game, onSubmitScore, actionPending }) {
                 return (
                   <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={player.user_id}>
                     <th scope="row">
+                      <TurnIndicator
+                        playerName={players[player.user_id]}
+                        isTurn={isOnTurn}
+                        gameActive={state.status === "active"}
+                      />
                       <PlayerProfileLink username={players[player.user_id]} />
                       {player.user_id === viewer.user_id ? " (you)" : ""}
                     </th>
@@ -1551,6 +1752,11 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
         {state.players.map((player) => (
           <div className="card whot-player" key={player.user_id}>
             <strong>
+              <TurnIndicator
+                playerName={players[player.user_id]}
+                isTurn={player.user_id === state.turn_user_id}
+                gameActive={state.status === "active"}
+              />
               <PlayerProfileLink username={players[player.user_id]} />
               {player.user_id === viewer.user_id ? " (you)" : ""}
             </strong>
@@ -1580,7 +1786,7 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
   );
 }
 
-function SoloDraughts({ token, username, displayName, onClose }) {
+function SoloDraughts({ token, username, displayName, orientation, onOrientationChange, onClose }) {
   const [game, setGame] = useState(createSoloDraughtsGame);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [thinking, setThinking] = useState(false);
@@ -1750,13 +1956,18 @@ function SoloDraughts({ token, username, displayName, onClose }) {
         : "The system's turn.";
 
   return (
-    <section className="game-section solo-game-section" id="solo-practice" aria-label="Solo Draughts">
+    <section
+      className={`game-section solo-game-section orientation-${orientation}`}
+      id="solo-practice"
+      aria-label="Solo Draughts"
+    >
       <div className="game-toolbar">
         <div>
           <p className="eyebrow">SOLO PRACTICE · LEVEL {gameLevel}</p>
           <h2>Draughts vs computer</h2>
         </div>
         <div className="room-actions">
+          <GameOrientationToggle orientation={orientation} onChange={onOrientationChange} />
           <ActionButton
             className="link"
             onClick={startNewGame}
@@ -1769,7 +1980,12 @@ function SoloDraughts({ token, username, displayName, onClose }) {
       </div>
       <div className="solo-draughts-layout">
         <div className="board-with-players">
-          <BoardPlayerLabel name="Computer" side="Black" />
+          <BoardPlayerLabel
+            name="Computer"
+            side="Black"
+            isTurn={game.turn === "computer"}
+            gameActive={game.status === "active"}
+          />
           <div className="draughts-board" aria-label="Solo Draughts board">
             {game.board.flatMap((row, y) =>
               row.map((piece, x) => {
@@ -1806,7 +2022,13 @@ function SoloDraughts({ token, username, displayName, onClose }) {
               })
             )}
           </div>
-          <BoardPlayerLabel name={displayName || username} username={username} side="Red · You" />
+          <BoardPlayerLabel
+            name={displayName || username}
+            username={username}
+            side="Red · You"
+            isTurn={game.turn === "player"}
+            gameActive={game.status === "active"}
+          />
         </div>
         <div className="game-info card" aria-live="polite">
           <p><strong>{statusMessage}</strong></p>
@@ -1856,7 +2078,7 @@ function SoloDraughts({ token, username, displayName, onClose }) {
   );
 }
 
-function SoloGame({ token, gameId, onClose }) {
+function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) {
   const [game, setGame] = useState(null);
   const [level, setLevel] = useState(1);
   const [highestLevel, setHighestLevel] = useState(1);
@@ -1961,13 +2183,18 @@ function SoloGame({ token, gameId, onClose }) {
   ));
 
   return (
-    <section className="game-section solo-game-section" id="solo-practice" aria-label={`Solo ${gameName}`}>
+    <section
+      className={`game-section solo-game-section orientation-${orientation}`}
+      id="solo-practice"
+      aria-label={`Solo ${gameName}`}
+    >
       <div className="game-toolbar">
         <div>
           <p className="eyebrow">SOLO PRACTICE · LEVEL {game?.level || level}</p>
           <h2>{gameName} vs computer</h2>
         </div>
         <div className="room-actions">
+          <GameOrientationToggle orientation={orientation} onChange={onOrientationChange} />
           <ActionButton className="link" onClick={onClose}>Quit game</ActionButton>
         </div>
       </div>
@@ -2510,6 +2737,7 @@ function HomeApp() {
   const [activeSeconds, setActiveSeconds] = useState(0);
   const [nextReminderSeconds, setNextReminderSeconds] = useState(60 * 60);
   const [activeGame, setActiveGame] = useState(null);
+  const [boardOrientation, setBoardOrientation] = useState("portrait");
   const [soloGameOpen, setSoloGameOpen] = useState(false);
   const [soloGameId, setSoloGameId] = useState("draughts");
   const [startSoloAfterAuth, setStartSoloAfterAuth] = useState(false);
@@ -3165,12 +3393,16 @@ function HomeApp() {
             token={session.token}
             username={session.username}
             displayName={session.display_name}
+            orientation={boardOrientation}
+            onOrientationChange={setBoardOrientation}
             onClose={quitSoloGame}
           />
         ) : (
           <SoloGame
             token={session.token}
             gameId={soloGameId}
+            orientation={boardOrientation}
+            onOrientationChange={setBoardOrientation}
             onClose={quitSoloGame}
           />
         )
@@ -3387,7 +3619,7 @@ function HomeApp() {
 
       {activeGame && (
         <section
-          className="game-section"
+          className={`game-section orientation-${boardOrientation}`}
           aria-label={`${activeGameName} game`}
         >
           <div className="game-toolbar">
@@ -3402,6 +3634,10 @@ function HomeApp() {
             }}>
               Quit game
             </ActionButton>
+            <GameOrientationToggle
+              orientation={boardOrientation}
+              onChange={setBoardOrientation}
+            />
           </div>
           {activeGame.game_id === "snooker" ? (
             <SnookerScorecard
@@ -3450,6 +3686,8 @@ function HomeApp() {
                 name={activeGame.player_display_names?.black || activeGame.players.black}
                 username={activeGame.players.black}
                 side="Black"
+                isTurn={activeGame.state.turn_user_id === activeGame.state.black_player_id}
+                gameActive={activeGame.state.status === "active"}
               />
               <div className="draughts-board" aria-label="Draughts board">
                 {activeGame.state.board.flatMap((row, y) =>
@@ -3486,6 +3724,8 @@ function HomeApp() {
                 name={activeGame.player_display_names?.red || activeGame.players.red}
                 username={activeGame.players.red}
                 side="Red"
+                isTurn={activeGame.state.turn_user_id === activeGame.state.red_player_id}
+                gameActive={activeGame.state.status === "active"}
               />
             </div>
             <div className="game-info card">
@@ -3504,7 +3744,12 @@ function HomeApp() {
             </div>
           </div>
           )}
-          <PracticeRoomChat token={session.token} roomId={activeGame.room_id} />
+          <PracticeRoomChat
+            key={activeGame.room_id}
+            token={session.token}
+            roomId={activeGame.room_id}
+            username={session.username}
+          />
           {activeGame.status === "finished" && (
             <GameDisputePanel
               token={session.token}

@@ -68,6 +68,48 @@ class PracticeRoomChatTests(unittest.TestCase):
                 "created_at": sent["created_at"],
             }],
         )
+        self.assertFalse(history["has_more"])
+
+    def test_chat_history_pages_older_messages_in_chronological_order(self):
+        with self.session_factory() as db:
+            db.add_all(
+                models.PracticeRoomMessage(
+                    room_id=self.room_id,
+                    user_id=self.host_id,
+                    content=f"Message {index}",
+                )
+                for index in range(205)
+            )
+            db.commit()
+            host = db.get(models.User, self.host_id)
+            latest = main.get_practice_room_chat(self.room_id, host, db)
+            earlier = main.get_practice_room_chat(
+                self.room_id,
+                host,
+                db,
+                before=latest["messages"][0]["id"],
+            )
+            earliest = main.get_practice_room_chat(
+                self.room_id,
+                host,
+                db,
+                before=earlier["messages"][0]["id"],
+            )
+
+        self.assertEqual(len(latest["messages"]), 100)
+        self.assertTrue(latest["has_more"])
+        self.assertEqual(len(earlier["messages"]), 100)
+        self.assertTrue(earlier["has_more"])
+        self.assertEqual(len(earliest["messages"]), 5)
+        self.assertFalse(earliest["has_more"])
+        self.assertLess(
+            latest["messages"][0]["id"],
+            latest["messages"][-1]["id"],
+        )
+        self.assertLess(
+            earlier["messages"][-1]["id"],
+            latest["messages"][0]["id"],
+        )
 
     def test_non_player_cannot_read_or_send_room_chat(self):
         with self.session_factory() as db:

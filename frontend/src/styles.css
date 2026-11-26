@@ -124,12 +124,34 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .game-section { border-top:1px solid #2A3949; padding-top:72px; }
 .game-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
 .game-toolbar h2 { margin:0; }
+.orientation-toggle { display:inline-flex; gap:4px; padding:4px; border:1px solid #405363; border-radius:10px; background:var(--surface); }
+.orientation-toggle button { min-height:36px; border:0; border-radius:7px; padding:0 12px; background:transparent; color:var(--muted); cursor:pointer; font:inherit; font-size:14px; }
+.orientation-toggle button.selected { background:#34495b; color:var(--text); }
+.orientation-toggle button:focus-visible,.chat-close:focus-visible,.chat-bell:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .game-layout { display:grid; grid-template-columns:minmax(280px,560px) minmax(220px,1fr); gap:32px; align-items:start; }
 .solo-draughts-layout { display:grid; grid-template-columns:minmax(280px,560px) minmax(220px,1fr); gap:32px; align-items:start; }
 .board-with-players { display:flex; flex-direction:column; gap:10px; min-width:0; }
 .board-player-label { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:40px; padding:8px 12px; border:1px solid #2A3949; border-radius:8px; background:var(--surface); }
-.board-player-label strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.board-player-label strong { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .board-player-label span { flex:0 0 auto; color:var(--muted); font-size:12px; text-transform:uppercase; }
+.turn-indicator { display:inline-block; flex:0 0 9px; width:9px; height:9px; margin-right:7px; border-radius:50%; vertical-align:middle; background:#e06a5f; box-shadow:0 0 0 2px #e06a5f22; }
+.board-player-label .turn-indicator { flex:0 0 9px; margin-right:0; color:transparent; font-size:0; line-height:0; text-transform:none; }
+.turn-indicator.active { background:#73c78c; box-shadow:0 0 0 2px #73c78c33; animation:turn-indicator-pulse 1.2s ease-in-out infinite; }
+.turn-indicator.waiting { animation:turn-indicator-waiting 1.6s ease-in-out infinite; }
+.turn-indicator.finished { background:#647482; box-shadow:none; }
+@keyframes turn-indicator-pulse { 50% { opacity:.35; box-shadow:0 0 0 5px #73c78c12; } }
+@keyframes turn-indicator-waiting { 50% { opacity:.45; } }
+.ludo-player-heading h3,.whot-player > strong { display:flex; align-items:center; gap:6px; }
+.golf-scorecard tbody th .turn-indicator { margin-right:6px; }
+.orientation-portrait .game-layout,.orientation-portrait .solo-draughts-layout,
+.orientation-portrait .golf-layout,.orientation-portrait .ludo-layout,
+.orientation-portrait .whot-layout { grid-template-columns:minmax(0,1fr); }
+.orientation-landscape .game-layout,.orientation-landscape .solo-draughts-layout {
+  grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr);
+}
+.orientation-landscape .golf-layout { grid-template-columns:minmax(0,1.4fr) minmax(240px,.8fr); }
+.orientation-landscape .ludo-layout { grid-template-columns:minmax(240px,.8fr) minmax(0,1.2fr); }
+.orientation-landscape .whot-layout { grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr); }
 .golf-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(240px,1fr); gap:24px; align-items:start; }
 .golf-scorecard-wrap { min-width:0; }
 .golf-scorecard-wrap h3 { margin:0 0 16px; }
@@ -168,12 +190,23 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .game-info { display:flex; flex-direction:column; gap:18px; }
 .game-info p { line-height:1.5; }
 .game-info .practice-note { color:#98e3b2; font-size:14px; }
-.chat-panel { margin-top:24px; }
-.chat-messages { display:flex; flex-direction:column; gap:12px; min-height:100px; max-height:320px; overflow:auto; margin:16px 0; padding:4px; }
+.chat-dock { position:fixed; right:max(16px,env(safe-area-inset-right,0px)); bottom:max(16px,env(safe-area-inset-bottom,0px)); z-index:100; }
+.chat-bell { position:relative; display:flex; align-items:center; gap:8px; min-height:48px; border:1px solid #526779; border-radius:999px; padding:0 16px; background:#243647; color:var(--text); box-shadow:0 8px 28px #0007; cursor:pointer; font:inherit; font-weight:600; }
+.chat-bell svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.8; }
+.chat-bell.has-unread svg { color:var(--accent); transform-origin:top center; animation:chat-bell-ring 1.2s ease-in-out infinite; }
+@keyframes chat-bell-ring { 0%,100% { transform:rotate(0); } 15%,45%,75% { transform:rotate(12deg); } 30%,60%,90% { transform:rotate(-12deg); } }
+.chat-unread-badge { position:absolute; top:-7px; right:-5px; display:grid; place-items:center; min-width:21px; height:21px; border:2px solid var(--bg); border-radius:999px; padding:0 5px; background:#e06a5f; color:#fff; font-size:11px; }
+.chat-panel { position:absolute; right:0; bottom:calc(100% + 12px); display:flex; flex-direction:column; gap:12px; width:min(380px,calc(100vw - 32px)); max-height:min(70dvh,580px); overflow:hidden; padding:16px; box-shadow:0 12px 40px #0009; }
+.chat-panel-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.chat-panel-heading h3 { margin:0; font-size:20px; }
+.chat-close { width:36px; height:36px; border:0; border-radius:8px; background:#263747; color:var(--text); cursor:pointer; font-size:24px; line-height:1; }
+.chat-messages { display:flex; flex:1 1 auto; flex-direction:column; gap:12px; min-height:100px; max-height:45dvh; overflow:auto; margin:0; padding:4px; overscroll-behavior:contain; }
 .chat-message { align-self:flex-start; max-width:85%; padding:10px 12px; border-radius:10px; background:#243647; overflow-wrap:anywhere; }
 .chat-message-heading { display:flex; align-items:center; gap:12px; }
 .chat-message-heading time { color:var(--muted); font-size:12px; }
 .chat-message p { margin:6px 0 0; color:var(--text); white-space:pre-wrap; }
+.chat-history-status { align-self:center; font-size:13px; }
+.chat-jump-latest { align-self:center; border:0; border-radius:999px; padding:8px 12px; background:#34495b; color:var(--text); cursor:pointer; }
 .chat-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; }
 .ludo-layout { display:grid; grid-template-columns:minmax(220px,320px) minmax(0,1fr); gap:24px; align-items:start; }
 .ludo-controls { display:flex; flex-direction:column; gap:18px; }
@@ -252,6 +285,9 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
   .profile-match-result { align-items:flex-start; text-align:left; }
   .room-actions { display:block; }
   .room-actions .link { padding-left:0; }
+  .game-toolbar { flex-wrap:wrap; gap:12px; }
+  .game-toolbar > :first-child { flex:1 1 100%; }
+  .orientation-toggle button { padding:0 9px; font-size:13px; }
   .room-form { grid-template-columns:1fr; }
   .room-form h3 { grid-column:auto; }
   .workflow-form { grid-template-columns:1fr; }
@@ -261,6 +297,14 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
   .solo-draughts-layout { grid-template-columns:1fr; }
   .ludo-layout { grid-template-columns:1fr; }
   .whot-layout { grid-template-columns:1fr; }
+  .orientation-landscape .game-layout,.orientation-landscape .solo-draughts-layout,
+  .orientation-landscape .golf-layout,.orientation-landscape .ludo-layout,
+  .orientation-landscape .whot-layout {
+    grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);
+    gap:12px;
+    align-items:start;
+  }
+  .orientation-landscape .game-info { max-height:72dvh; overflow:auto; padding:16px; }
   .whot-hand { justify-content:center; }
   .selected-game-options {
     position:fixed;
@@ -286,4 +330,7 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
     line-height:1.2;
     white-space:normal;
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-indicator.active,.turn-indicator.waiting,.chat-bell.has-unread svg { animation:none; }
 }

@@ -2083,19 +2083,31 @@ def get_practice_room_chat(
     room_id: int,
     user: models.User = Depends(current_user),
     db: Session = Depends(get_db),
+    before: int | None = None,
 ):
     room = db.get(models.PracticeRoom, room_id)
     if not room:
         raise HTTPException(404, "Practice room not found")
     _require_game_player(db, room_id, user.id)
-    rows = db.execute(
+    statement = (
         select(models.PracticeRoomMessage, models.User.username)
         .join(models.User, models.User.id == models.PracticeRoomMessage.user_id)
         .where(models.PracticeRoomMessage.room_id == room_id)
-        .order_by(models.PracticeRoomMessage.id.desc())
-        .limit(100)
+    )
+    if before is not None:
+        statement = statement.where(models.PracticeRoomMessage.id < before)
+    rows = db.execute(
+        statement.order_by(models.PracticeRoomMessage.id.desc()).limit(101)
     ).all()
-    return {"messages": [_practice_room_message_response(message, username) for message, username in reversed(rows)]}
+    has_more = len(rows) > 100
+    messages = rows[:100]
+    return {
+        "messages": [
+            _practice_room_message_response(message, username)
+            for message, username in reversed(messages)
+        ],
+        "has_more": has_more,
+    }
 
 
 @app.post("/rooms/{room_id}/chat", status_code=201)

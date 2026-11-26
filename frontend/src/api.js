@@ -87,8 +87,8 @@ export const joinPracticeRoom = (token, roomId) =>
   request(`/rooms/${roomId}/join`, { method: "POST" }, token);
 export const getPracticeGame = (token, roomId) =>
   request(`/rooms/${roomId}/game`, {}, token);
-export const getPracticeRoomChat = (token, roomId) =>
-  request(`/rooms/${roomId}/chat`, {}, token);
+export const getPracticeRoomChat = (token, roomId, before) =>
+  request(`/rooms/${roomId}/chat${before ? `?before=${before}` : ""}`, {}, token);
 export const sendPracticeRoomChat = (token, roomId, content) =>
   request(`/rooms/${roomId}/chat`, {
     method: "POST",
