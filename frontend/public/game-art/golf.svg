@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+  <defs>
+    <linearGradient id="sky" y2="1"><stop stop-color="#4a8ba9"/><stop offset="1" stop-color="#c1dfd7"/></linearGradient>
+    <linearGradient id="green" y2="1"><stop stop-color="#83bf79"/><stop offset="1" stop-color="#28734f"/></linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#sky)"/>
+  <circle cx="498" cy="78" r="42" fill="#ffe398"/>
+  <path d="M0 232Q155 130 300 236t340-4v128H0z" fill="#518b68"/>
+  <path d="M0 276q180-91 340 9t300-13v88H0z" fill="url(#green)"/>
+  <path d="M0 315q190-55 370 10t270-18v53H0z" fill="#236144"/>
+  <path d="M438 226V106" stroke="#f7f0d7" stroke-width="8" stroke-linecap="round"/>
+  <path d="M442 109l91 21-91 25z" fill="#f05a57"/>
+  <ellipse cx="433" cy="292" rx="46" ry="12" fill="#183c32" opacity=".55"/>
+  <circle cx="349" cy="287" r="14" fill="#f6f2df" stroke="#9eb1a6" stroke-width="3"/>
+  <path d="M349 274l80-47" stroke="#f0ddaa" stroke-width="6" stroke-linecap="round"/>
+  <path d="M375 335h165" stroke="#e6f4cf" stroke-opacity=".35" stroke-width="3"/>
+</svg>

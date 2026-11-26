@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#352347"/><stop offset="1" stop-color="#8a4660"/></linearGradient>
+    <linearGradient id="card" y2="1"><stop stop-color="#fffdf2"/><stop offset="1" stop-color="#e7dfca"/></linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#bg)"/>
+  <circle cx="94" cy="292" r="116" fill="#f5b83d" opacity=".11"/>
+  <circle cx="560" cy="62" r="93" fill="#65c6ca" opacity=".12"/>
+  <g transform="rotate(-14 235 180)">
+    <rect x="112" y="65" width="177" height="235" rx="18" fill="url(#card)" stroke="#d0c5ae" stroke-width="5"/>
+    <path d="M155 120l42-28 42 28-42 28z" fill="#df4b55"/>
+    <circle cx="197" cy="218" r="38" fill="#efc54b"/><circle cx="197" cy="218" r="19" fill="#f8f2de"/>
+  </g>
+  <g transform="rotate(10 381 180)">
+    <rect x="304" y="61" width="177" height="235" rx="18" fill="url(#card)" stroke="#d0c5ae" stroke-width="5"/>
+    <path d="M348 116h88v14h-88zm37-35h14v85h-14z" fill="#3789c4"/>
+    <path d="M391 205l40 56h-80z" fill="#56a96b"/>
+    <circle cx="391" cy="222" r="13" fill="#f4e9d2"/>
+  </g>
+  <path d="M530 280h45" stroke="#f5b83d" stroke-width="5" stroke-linecap="round"/>
+</svg>

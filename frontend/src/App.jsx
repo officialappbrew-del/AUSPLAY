@@ -10,6 +10,17 @@ import {
 import { findDirectionalTarget, getGamepadDirection } from "./gamepadNavigation";
 import { mergeGameCatalogue } from "./gameCatalogue";
 
+const GAME_ARTWORK = {
+  chess: "/game-art/chess.svg",
+  draughts: "/game-art/draughts.svg",
+  golf: "/game-art/golf.svg",
+  ludo: "/game-art/ludo.svg",
+  polo: "/game-art/polo.svg",
+  ps5: "/game-art/ps5.svg",
+  snooker: "/game-art/snooker.svg",
+  whot: "/game-art/whot.svg",
+};
+
 function ActionButton({ loading = false, disabled = false, onClick, children, ...props }) {
   const [clickPending, setClickPending] = useState(false);
   const pendingRef = useRef(false);
@@ -2913,7 +2924,6 @@ function HomeApp() {
   const [games, setGames] = useState(INITIAL_GAMES);
   const [rulebooks, setRulebooks] = useState({});
   const [rooms, setRooms] = useState([]);
-  const [wallet, setWallet] = useState(null);
   const [hostApplication, setHostApplication] = useState(null);
   const [breakReminderMinutes, setBreakReminderMinutes] = useState(60);
   const [activeSeconds, setActiveSeconds] = useState(0);
@@ -2992,12 +3002,10 @@ function HomeApp() {
   }, [session]);
   useEffect(() => {
     if (session) {
-      api.getWallet(session.token).then(setWallet).catch((err) => setNotice(err.message));
       api.getMyHostApplication(session.token)
         .then(setHostApplication)
         .catch((err) => setNotice(err.message));
     } else {
-      setWallet(null);
       setHostApplication(null);
       setActiveGame(null);
     }
@@ -3546,9 +3554,6 @@ function HomeApp() {
           <h1>Find your next<br />friendly challenge.</h1>
           <p>Discover games, meet your players, and practise together.</p>
           {!session && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
-          {session && wallet && (
-            <p className="wallet">Wallet: NGN {(wallet.available_kobo / 100).toLocaleString()}</p>
-          )}
         </header>
       )}
 
@@ -3576,7 +3581,13 @@ function HomeApp() {
                 }
               } : undefined}
             >
-              <span className="game-mark">{g.name.slice(0, 1)}</span>
+              <div className="game-card-art" aria-hidden="true">
+                {GAME_ARTWORK[g.id] ? (
+                  <img src={GAME_ARTWORK[g.id]} alt="" loading="lazy" decoding="async" />
+                ) : (
+                  <span className="game-card-art-fallback">{g.name.slice(0, 1)}</span>
+                )}
+              </div>
               <span className={`game-availability ${g.playable ? "ready" : ""}`}>
                 {g.playable ? "Playable now" : "Coming soon"}
               </span>
