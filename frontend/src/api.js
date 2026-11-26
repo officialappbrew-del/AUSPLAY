@@ -1,12 +1,13 @@
 const DEFAULT_API_URL = import.meta.env.PROD
   ? "https://ausplay.onrender.com"
-  : "http://localhost:8000";
+  : `http://${window.location.hostname}:8000`;
 const BASE = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, "");
 const WS_BASE = BASE.replace(/^http/, "ws");
 
 async function request(path, options = {}, token) {
   const res = await fetch(BASE + path, {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -20,7 +21,11 @@ async function request(path, options = {}, token) {
         return `${field ? `${field}: ` : ""}${issue.msg || "Invalid input"}`;
       }).join("; ")
       : data.detail;
-    throw new Error(typeof detail === "string" && detail ? detail : "Something went wrong");
+    const error = new Error(
+      typeof detail === "string" && detail ? detail : "Something went wrong",
+    );
+    error.status = res.status;
+    throw error;
   }
   return data;
 }
@@ -32,6 +37,7 @@ export const register = (username, password, ageConfirmed) =>
   });
 export const login = (username, password) =>
   request("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
+export const logout = (token) => request("/auth/logout", { method: "POST" }, token);
 export const getMe = (token) => request("/me", {}, token);
 export const getPlayerProfile = (token) => request("/me/profile", {}, token);
 export const getGames = () => request("/games");

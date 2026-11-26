@@ -2084,6 +2084,7 @@ function PlayerProfile({ token }) {
 
 export default function App() {
   const [session, setSession] = useState(null); // { token, username }
+  const [authReady, setAuthReady] = useState(false);
   const [mode, setMode] = useState(null); // "signup" | "login" | null
   const [profileOpen, setProfileOpen] = useState(false);
   const [games, setGames] = useState([]);
@@ -2120,6 +2121,24 @@ export default function App() {
 
   useEffect(() => {
     api.getGames().then(setGames).catch((err) => setNotice(err.message));
+  }, []);
+  useEffect(() => {
+    let stopped = false;
+    api.getMe()
+      .then((user) => {
+        if (!stopped) setSession({ ...user, token: "" });
+      })
+      .catch((err) => {
+        if (!stopped && err.status !== 401) {
+          setNotice(`Could not restore your session: ${err.message}`);
+        }
+      })
+      .finally(() => {
+        if (!stopped) setAuthReady(true);
+      });
+    return () => {
+      stopped = true;
+    };
   }, []);
   useEffect(() => {
     if (soloGameOpen) {
@@ -2558,6 +2577,10 @@ export default function App() {
     : "";
 
   function selectGame(game) {
+    if (!authReady) {
+      setNotice("Checking your session. Please try again in a moment.");
+      return;
+    }
     if (!game.playable) {
       setNotice(`${game.name} is coming soon.`);
       return;
@@ -2608,12 +2631,29 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  async function logOut() {
+    try {
+      await api.logout(session?.token);
+    } catch (err) {
+      setNotice(`Could not log out: ${err.message}`);
+      return;
+    }
+    setSession(null);
+    setProfileOpen(false);
+    setNotice("");
+    setActiveGame(null);
+    setSoloGameOpen(false);
+    setStartSoloAfterAuth(false);
+  }
+
   return (
     <div className={`page${showSelectedGameOptions && selectedGame ? " has-mobile-game-options" : ""}${activeGame || soloGameOpen ? " game-focus" : ""}`}>
       <nav>
         <span className="logo">Aus<b>Play</b></span>
         <div className="nav-links">
-          {session ? (
+          {!authReady ? (
+            <span className="login-prompt" role="status">Checking session...</span>
+          ) : session ? (
             <>
               <ActionButton
                 className="link username-link"
@@ -2625,17 +2665,7 @@ export default function App() {
                 {session.username}
               </ActionButton>
               <span className="role-badge">{session.role}</span>
-              <ActionButton
-                className="link"
-                onClick={() => {
-                  setSession(null);
-                  setProfileOpen(false);
-                  setNotice("");
-                  setActiveGame(null);
-                  setSoloGameOpen(false);
-                  setStartSoloAfterAuth(false);
-                }}
-              >
+              <ActionButton className="link" onClick={logOut}>
                 Log out
               </ActionButton>
             </>
@@ -2730,7 +2760,7 @@ export default function App() {
           <p className="eyebrow">PLAY FAIR. PLAY TOGETHER.</p>
           <h1>Find your next<br />friendly challenge.</h1>
           <p>Discover games, meet your players, and practise together.</p>
-          {!session && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
+          {!session && authReady && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
           {session && wallet && (
             <p className="wallet">Wallet: NGN {(wallet.available_kobo / 100).toLocaleString()}</p>
           )}

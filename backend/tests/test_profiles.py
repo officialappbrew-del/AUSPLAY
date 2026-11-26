@@ -2,14 +2,14 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import main, models
 from app.db import Base
-from app.security import make_token
+from app.security import hash_password, make_token
 
 
 class PlayerProfileTests(unittest.TestCase):
@@ -162,6 +162,53 @@ class PlayerProfileTests(unittest.TestCase):
 
         self.assertEqual(anonymous.exception.status_code, 401)
         self.assertEqual(authenticated.id, self.player_id)
+
+    def test_registration_sets_http_only_cookie_used_by_auth_dependency(self):
+        response = Response()
+        with self.session_factory() as db:
+            result = main.register(
+                main.Credentials(
+                    username="cookie_player",
+                    password="password-123",
+                    age_confirmed=True,
+                ),
+                response,
+                db,
+            )
+            cookie = response.headers["set-cookie"]
+            token = cookie.split(";", 1)[0].split("=", 1)[1]
+            authenticated = main.current_user(None, db, token)
+
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn(main.AUTH_COOKIE_NAME, cookie)
+        self.assertEqual(authenticated.username, "cookie_player")
+        self.assertEqual(result["token"], token)
+
+    def test_login_sets_http_only_cookie(self):
+        response = Response()
+        with self.session_factory() as db:
+            player = db.get(models.User, self.player_id)
+            player.password_hash = hash_password("password-123")
+            db.commit()
+
+            main.login(
+                main.Credentials(username=player.username, password="password-123"),
+                response,
+                db,
+            )
+            cookie = response.headers["set-cookie"]
+            token = cookie.split(";", 1)[0].split("=", 1)[1]
+            authenticated = main.current_user(None, db, token)
+
+        self.assertIn("HttpOnly", cookie)
+        self.assertEqual(authenticated.id, self.player_id)
+
+    def test_logout_clears_session_cookie(self):
+        response = Response()
+        main.logout(response)
+
+        self.assertIn(f"{main.AUTH_COOKIE_NAME}=", response.headers["set-cookie"])
+        self.assertIn("Max-Age=0", response.headers["set-cookie"])
 
     def _add_game(
         self,

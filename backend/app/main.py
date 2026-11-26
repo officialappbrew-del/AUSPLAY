@@ -5,8 +5,18 @@ import re
 import secrets
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, literal, select, union_all, update
@@ -31,6 +41,8 @@ from .security import hash_password, make_token, read_token, verify_password
 
 app = FastAPI(title="AusPlay API")
 room_updates = RoomUpdateManager()
+AUTH_COOKIE_NAME = "ausplay_session"
+AUTH_COOKIE_MAX_AGE = 12 * 60 * 60
 cors_origins = [
     origin.strip().rstrip("/")
     for origin in os.getenv(
@@ -39,13 +51,57 @@ cors_origins = [
     ).split(",")
     if origin.strip()
 ]
+cookie_secure_setting = os.getenv("AUTH_COOKIE_SECURE")
+AUTH_COOKIE_SECURE = (
+    cookie_secure_setting.lower() in {"1", "true", "yes"}
+    if cookie_secure_setting is not None
+    else any(origin.startswith("https://") for origin in cors_origins)
+)
+AUTH_COOKIE_SAMESITE = "none" if AUTH_COOKIE_SECURE else "lax"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 bearer = HTTPBearer(auto_error=False)
+
+
+@app.middleware("http")
+async def validate_cookie_request_origin(request: Request, call_next):
+    if (
+        request.method not in {"GET", "HEAD", "OPTIONS"}
+        and request.cookies.get(AUTH_COOKIE_NAME)
+        and request.headers.get("origin") not in cors_origins
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Request origin is not allowed"},
+        )
+    return await call_next(request)
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=AUTH_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        path="/",
+    )
 
 
 @app.get("/")
@@ -253,8 +309,10 @@ def _require_host(user: models.User) -> models.User:
 def current_user(
     cred: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
+    session_cookie: str | None = Cookie(default=None, alias=AUTH_COOKIE_NAME),
 ) -> models.User:
-    uid = read_token(cred.credentials) if cred else None
+    token = cred.credentials if cred else session_cookie
+    uid = read_token(token) if isinstance(token, str) else None
     user = db.get(models.User, uid) if uid else None
     if not user:
         raise HTTPException(401, "Not authenticated")
@@ -262,7 +320,7 @@ def current_user(
 
 
 @app.post("/auth/register")
-def register(body: Credentials, db: Session = Depends(get_db)):
+def register(body: Credentials, response: Response, db: Session = Depends(get_db)):
     if not re.fullmatch(r"[A-Za-z0-9_]{3,32}", body.username):
         raise HTTPException(422, "Username must be 3-32 letters, numbers or underscores")
     if len(body.password) < 8:
@@ -274,23 +332,33 @@ def register(body: Credentials, db: Session = Depends(get_db)):
     user = models.User(username=body.username.lower(), password_hash=hash_password(body.password))
     db.add(user)
     db.commit()
+    token = make_token(user.id)
+    _set_auth_cookie(response, token)
     return {
-        "token": make_token(user.id),
+        "token": token,
         "username": user.username,
         "role": _effective_role(user),
     }
 
 
 @app.post("/auth/login")
-def login(body: Credentials, db: Session = Depends(get_db)):
+def login(body: Credentials, response: Response, db: Session = Depends(get_db)):
     user = db.scalar(select(models.User).where(models.User.username == body.username.lower()))
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Wrong username or password")
+    token = make_token(user.id)
+    _set_auth_cookie(response, token)
     return {
-        "token": make_token(user.id),
+        "token": token,
         "username": user.username,
         "role": _effective_role(user),
     }
+
+
+@app.post("/auth/logout")
+def logout(response: Response):
+    _clear_auth_cookie(response)
+    return {"message": "Logged out"}
 
 
 @app.get("/me")
@@ -936,18 +1004,25 @@ def review_moderation_report(
 @app.websocket("/ws/rooms/{room_id}")
 async def room_game_updates(websocket: WebSocket, room_id: int) -> None:
     await websocket.accept()
-    try:
-        message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=10))
-    except asyncio.TimeoutError:
-        await websocket.close(code=4408)
-        return
-    except json.JSONDecodeError:
-        await websocket.close(code=4400)
-        return
-    except WebSocketDisconnect:
-        return
+    token = getattr(websocket, "cookies", {}).get(AUTH_COOKIE_NAME)
+    if token:
+        origin = websocket.headers.get("origin")
+        if origin not in cors_origins:
+            await websocket.close(code=4403)
+            return
+    else:
+        try:
+            message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=10))
+        except asyncio.TimeoutError:
+            await websocket.close(code=4408)
+            return
+        except json.JSONDecodeError:
+            await websocket.close(code=4400)
+            return
+        except WebSocketDisconnect:
+            return
+        token = message.get("token") if isinstance(message, dict) else None
 
-    token = message.get("token") if isinstance(message, dict) else None
     user_id = read_token(token) if isinstance(token, str) else None
     with SessionLocal() as db:
         user = db.get(models.User, user_id) if user_id else None
@@ -1308,8 +1383,10 @@ def play_solo_game_action(
 def practice_rooms(
     cred: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
+    session_cookie: str | None = Cookie(default=None, alias=AUTH_COOKIE_NAME),
 ):
-    viewer_id = read_token(cred.credentials) if cred else None
+    token = cred.credentials if cred else session_cookie
+    viewer_id = read_token(token) if isinstance(token, str) else None
     if viewer_id is not None and db.get(models.User, viewer_id) is None:
         viewer_id = None
     rows = db.execute(

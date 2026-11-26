@@ -39,6 +39,8 @@ class FakeConnection:
         self.messages = []
         self.close_code = None
         self.received_auth = False
+        self.cookies = {}
+        self.headers = {}
 
     async def accept(self):
         pass
@@ -192,6 +194,29 @@ class RoomWebSocketTests(unittest.TestCase):
             [{"type": "connected", "version": None}],
         )
         self.assertIsNone(connection.close_code)
+
+    def test_seated_player_can_authenticate_with_session_cookie(self):
+        connection = FakeConnection("")
+        connection.cookies[main.AUTH_COOKIE_NAME] = self.host_token
+        connection.headers["origin"] = main.cors_origins[0]
+
+        asyncio.run(main.room_game_updates(connection, self.room_id))
+
+        self.assertEqual(
+            connection.messages,
+            [{"type": "connected", "version": 0}],
+        )
+        self.assertIsNone(connection.close_code)
+
+    def test_session_cookie_websocket_rejects_untrusted_origin(self):
+        connection = FakeConnection("")
+        connection.cookies[main.AUTH_COOKIE_NAME] = self.host_token
+        connection.headers["origin"] = "https://attacker.example"
+
+        asyncio.run(main.room_game_updates(connection, self.room_id))
+
+        self.assertEqual(connection.close_code, 4403)
+        self.assertEqual(connection.messages, [])
 
     def test_second_player_join_publishes_game_start(self):
         connection = FakeWebSocket()

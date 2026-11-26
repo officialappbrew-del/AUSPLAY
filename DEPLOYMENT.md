@@ -46,6 +46,7 @@ local `.env` file.
    | `DATABASE_URL` | The private PostgreSQL connection URL from step 2 |
    | `SECRET_KEY` | Generate a new, long random secret; do not reuse the development key |
    | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` for initial testing; update with the Vercel site URL in step 5 |
+   | `AUTH_COOKIE_SECURE` | `true` for the deployed HTTPS service |
 
    Generate a local secret if needed with
    `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Add the output only
@@ -224,7 +225,7 @@ In the Render backend's environment settings, set `CORS_ORIGINS` to the exact or
 of the deployed Vercel site, including `https://` and without a trailing slash:
 
 ```text
-https://ausplay.vercel.app/
+https://ausplay.vercel.app
 ```
 
 For a custom domain or additional stable frontend origins, list each origin separated
@@ -232,7 +233,7 @@ by commas. Include the exact scheme, hostname, and port used by the browser; `lo
 and `127.0.0.1` are different origins. For example:
 
 ```text
-https://ausplay.vercel.app/,https://play.example.com
+https://ausplay.vercel.app,https://play.example.com
 ```
 
 Save the setting and redeploy/restart the Render service. For local development, the
@@ -242,6 +243,15 @@ For local development on either hostname, set
 If an `OPTIONS` request returns 400, check the browser's Network panel for the request's
 `Origin` and include that exact origin (including its port) in `CORS_ORIGINS`; restart
 the backend after changing the local `.env`.
+
+Authentication is restored from an HttpOnly session cookie when the page loads. The
+cookie lasts 12 hours, is `Secure` and `SameSite=None` in production, and is cleared by
+the **Log out** action. Credentialed CORS must use the exact frontend origin above; the
+backend also checks request origins for cookie-authenticated changes. After deploying
+this update, log in once again so the backend can issue the cookie, then verify that a
+page refresh keeps you signed in. If the browser blocks third-party cookies between the
+Vercel and Render domains, use a custom frontend/API domain under the same site or enable
+third-party cookies for the site.
 
 ## 6. Verify the deployment
 
