@@ -2615,14 +2615,14 @@ export default function App() {
         <div className="nav-links">
           {session ? (
             <>
-              <span>{session.username}</span>
               <ActionButton
-                className="link"
+                className="link username-link"
                 aria-expanded={profileOpen}
                 aria-controls="player-profile"
+                aria-label={`View ${session.username}'s profile and game history`}
                 onClick={() => setProfileOpen((open) => !open)}
               >
-                {profileOpen ? "Close profile" : "Profile"}
+                {session.username}
               </ActionButton>
               <span className="role-badge">{session.role}</span>
               <ActionButton
