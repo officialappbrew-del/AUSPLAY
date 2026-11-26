@@ -1186,6 +1186,39 @@ function GameOrientationToggle({ orientation, onChange }) {
   );
 }
 
+function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }) {
+  const dialogRef = useRef(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+    if (!dialog.open) dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  return (
+    <dialog
+      className="confirm-dialog"
+      ref={dialogRef}
+      aria-labelledby="confirm-dialog-title"
+      aria-describedby="confirm-dialog-message"
+      onCancel={(event) => {
+        event.preventDefault();
+        onCancel();
+      }}
+    >
+      <h2 id="confirm-dialog-title">{title}</h2>
+      <p id="confirm-dialog-message">{message}</p>
+      <div className="confirm-dialog-actions">
+        <button className="link" type="button" onClick={onCancel}>Cancel</button>
+        <button className="btn" type="button" onClick={onConfirm}>{confirmLabel}</button>
+      </div>
+    </dialog>
+  );
+}
+
 function BoardPlayerLabel({ name, username = name, side, isTurn, gameActive = true }) {
   return (
     <div className="board-player-label">
@@ -1799,6 +1832,8 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [progressMessage, setProgressMessage] = useState("");
+  const [confirmation, setConfirmation] = useState(null);
+  const [pendingLevel, setPendingLevel] = useState(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [round, setRound] = useState(0);
@@ -1934,8 +1969,7 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
     setRound((current) => current + 1);
   }
 
-  function chooseLevel(event) {
-    const selectedLevel = Number(event.target.value);
+  function applyLevelChoice(selectedLevel) {
     setLevel(selectedLevel);
     setGameLevel(selectedLevel);
     setGame(createSoloDraughtsGame());
@@ -1944,6 +1978,16 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
     setProgressMessage("");
     setSaveError("");
     setRound((current) => current + 1);
+  }
+
+  function chooseLevel(event) {
+    const selectedLevel = Number(event.target.value);
+    if (game.status === "active") {
+      setPendingLevel(selectedLevel);
+      setConfirmation("change-level");
+      return;
+    }
+    applyLevelChoice(selectedLevel);
   }
 
   const statusMessage = game.status === "finished"
@@ -1970,12 +2014,12 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
           <GameOrientationToggle orientation={orientation} onChange={onOrientationChange} />
           <ActionButton
             className="link"
-            onClick={startNewGame}
+            onClick={() => setConfirmation("new-game")}
             disabled={progressSaving}
           >
             New game
           </ActionButton>
-          <ActionButton className="link" onClick={onClose}>Quit game</ActionButton>
+          <ActionButton className="link" onClick={() => setConfirmation("quit")}>Quit game</ActionButton>
         </div>
       </div>
       <div className="solo-draughts-layout">
@@ -2074,6 +2118,41 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
           <p className="practice-note">Free practice against the computer. An account is required; there are no stakes.</p>
         </div>
       </div>
+      {confirmation && (
+        <ConfirmDialog
+          title={confirmation === "quit"
+            ? "Quit this game?"
+            : confirmation === "change-level"
+              ? "Change level?"
+              : "Start a new game?"}
+          message={confirmation === "quit"
+            ? "Your current solo round will end; only your unlocked level progress is saved."
+            : confirmation === "change-level"
+              ? "Changing level will end this round and start a fresh board at the selected level. Your unlocked progress will remain saved."
+              : "This will end the current round and deal a fresh board at the selected level. Your unlocked progress will remain saved."}
+          confirmLabel={confirmation === "quit"
+            ? "Quit game"
+            : confirmation === "change-level"
+              ? "Change level"
+              : "Start new game"}
+          onCancel={() => {
+            setConfirmation(null);
+            setPendingLevel(null);
+          }}
+          onConfirm={() => {
+            const action = confirmation;
+            setConfirmation(null);
+            if (action === "quit") {
+              onClose();
+            } else if (action === "change-level" && pendingLevel != null) {
+              applyLevelChoice(pendingLevel);
+              setPendingLevel(null);
+            } else {
+              startNewGame();
+            }
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -2087,6 +2166,7 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
   const [error, setError] = useState("");
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [confirmation, setConfirmation] = useState(null);
   const gameName = gameId.charAt(0).toUpperCase() + gameId.slice(1);
 
   useEffect(() => {
@@ -2128,6 +2208,14 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
       setError(err.message);
     } finally {
       setPending(false);
+    }
+  }
+
+  function requestNewGame() {
+    if (game?.status === "active") {
+      setConfirmation({ type: "new-game", level });
+    } else {
+      void startGame(level);
     }
   }
 
@@ -2195,7 +2283,9 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
         </div>
         <div className="room-actions">
           <GameOrientationToggle orientation={orientation} onChange={onOrientationChange} />
-          <ActionButton className="link" onClick={onClose}>Quit game</ActionButton>
+          <ActionButton className="link" onClick={() => setConfirmation({ type: "quit" })}>
+            Quit game
+          </ActionButton>
         </div>
       </div>
 
@@ -2249,7 +2339,7 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
             </label>
             <ActionButton
               className="link"
-              onClick={() => void startGame(level)}
+              onClick={requestNewGame}
               disabled={pending}
             >
               Start new game
@@ -2299,6 +2389,25 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
             </ActionButton>
           )}
         </div>
+      )}
+      {confirmation && (
+        <ConfirmDialog
+          title={confirmation.type === "quit" ? "Leave this solo game?" : "Start a new game?"}
+          message={confirmation.type === "quit"
+            ? "Your current solo game will stay saved, and you can return to it later."
+            : "Starting a new game will abandon the current solo game and replace it. Your unlocked level progress will remain saved."}
+          confirmLabel={confirmation.type === "quit" ? "Leave game" : "Start new game"}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => {
+            const action = confirmation;
+            setConfirmation(null);
+            if (action.type === "quit") {
+              onClose();
+            } else {
+              void startGame(action.level);
+            }
+          }}
+        />
       )}
       <p className="practice-note">Free practice against the computer. An account is required; there are no stakes.</p>
     </section>
@@ -2737,6 +2846,7 @@ function HomeApp() {
   const [activeSeconds, setActiveSeconds] = useState(0);
   const [nextReminderSeconds, setNextReminderSeconds] = useState(60 * 60);
   const [activeGame, setActiveGame] = useState(null);
+  const [confirmQuitGame, setConfirmQuitGame] = useState(false);
   const [boardOrientation, setBoardOrientation] = useState("portrait");
   const [soloGameOpen, setSoloGameOpen] = useState(false);
   const [soloGameId, setSoloGameId] = useState("draughts");
@@ -3630,11 +3740,7 @@ function HomeApp() {
               <p className="eyebrow">FREE PRACTICE MATCH</p>
               <h2>{activeGameName}</h2>
             </div>
-            <ActionButton className="link" onClick={() => {
-              setActiveGame(null);
-              setSelectedSquare(null);
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}>
+            <ActionButton className="link" onClick={() => setConfirmQuitGame(true)}>
               Quit game
             </ActionButton>
             <GameOrientationToggle
@@ -3758,6 +3864,20 @@ function HomeApp() {
               token={session.token}
               roomId={activeGame.room_id}
               onNotice={setNotice}
+            />
+          )}
+          {confirmQuitGame && (
+            <ConfirmDialog
+              title="Leave this game?"
+              message="This closes the game view, but your room and match remain available. You can reopen the game from your practice rooms."
+              confirmLabel="Leave game"
+              onCancel={() => setConfirmQuitGame(false)}
+              onConfirm={() => {
+                setConfirmQuitGame(false);
+                setActiveGame(null);
+                setSelectedSquare(null);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
             />
           )}
         </section>

@@ -147,11 +147,16 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .orientation-portrait .golf-layout,.orientation-portrait .ludo-layout,
 .orientation-portrait .whot-layout { grid-template-columns:minmax(0,1fr); }
 .orientation-landscape .game-layout,.orientation-landscape .solo-draughts-layout {
-  grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr);
+  grid-template-columns:minmax(0,3.2fr) minmax(160px,.8fr);
 }
-.orientation-landscape .golf-layout { grid-template-columns:minmax(0,1.4fr) minmax(240px,.8fr); }
-.orientation-landscape .ludo-layout { grid-template-columns:minmax(240px,.8fr) minmax(0,1.2fr); }
-.orientation-landscape .whot-layout { grid-template-columns:minmax(0,1.2fr) minmax(240px,.8fr); }
+.orientation-landscape .golf-layout { grid-template-columns:minmax(0,3fr) minmax(180px,.8fr); }
+.orientation-landscape .ludo-layout { grid-template-columns:minmax(180px,.8fr) minmax(0,3fr); }
+.orientation-landscape .whot-layout { grid-template-columns:minmax(0,3fr) minmax(180px,.8fr); }
+.orientation-landscape .game-toolbar { margin-bottom:12px; }
+.orientation-landscape .game-toolbar .eyebrow { display:none; }
+.orientation-landscape .game-toolbar h2 { font-size:clamp(22px,3vw,30px); }
+.orientation-landscape .game-info { max-height:70dvh; gap:10px; overflow:auto; padding:16px; }
+.orientation-landscape .game-info .practice-note { display:none; }
 .golf-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(240px,1fr); gap:24px; align-items:start; }
 .golf-scorecard-wrap { min-width:0; }
 .golf-scorecard-wrap h3 { margin:0 0 16px; }
@@ -208,6 +213,13 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .chat-history-status { align-self:center; font-size:13px; }
 .chat-jump-latest { align-self:center; border:0; border-radius:999px; padding:8px 12px; background:#34495b; color:var(--text); cursor:pointer; }
 .chat-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; }
+.confirm-dialog { width:min(440px,calc(100vw - 32px)); max-width:none; border:1px solid #526779; border-radius:16px; padding:24px; background:var(--surface); color:var(--text); box-shadow:0 18px 56px #000b; }
+.confirm-dialog::backdrop { background:#070b10cc; backdrop-filter:blur(3px); }
+.confirm-dialog h2 { margin:0 0 12px; font-size:26px; }
+.confirm-dialog p { margin:0; color:var(--muted); line-height:1.55; }
+.confirm-dialog-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:12px; margin-top:24px; }
+.confirm-dialog-actions .link { min-width:90px; }
+.confirm-dialog-actions .btn { min-width:130px; }
 .ludo-layout { display:grid; grid-template-columns:minmax(220px,320px) minmax(0,1fr); gap:24px; align-items:start; }
 .ludo-controls { display:flex; flex-direction:column; gap:18px; }
 .ludo-controls p { line-height:1.5; }
@@ -300,11 +312,12 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
   .orientation-landscape .game-layout,.orientation-landscape .solo-draughts-layout,
   .orientation-landscape .golf-layout,.orientation-landscape .ludo-layout,
   .orientation-landscape .whot-layout {
-    grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);
+    grid-template-columns:minmax(0,1fr);
     gap:12px;
-    align-items:start;
   }
-  .orientation-landscape .game-info { max-height:72dvh; overflow:auto; padding:16px; }
+  .orientation-landscape .game-info { max-height:35dvh; }
+  .game-section.orientation-landscape { padding-top:12px; }
+  .orientation-landscape .game-toolbar { margin-bottom:10px; }
   .whot-hand { justify-content:center; }
   .selected-game-options {
     position:fixed;
