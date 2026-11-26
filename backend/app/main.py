@@ -1,8 +1,14 @@
 import asyncio
+import hashlib
 import json
+import logging
 import os
 import re
 import secrets
+import smtplib
+import ssl
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from typing import Literal
 
 from fastapi import (
@@ -20,7 +26,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, literal, select, union_all, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
 from . import (
@@ -38,8 +44,10 @@ from . import (
 from .db import SessionLocal, get_db
 from .realtime import RoomUpdateManager
 from .security import hash_password, make_token, read_token, verify_password
+from .security import read_token_version
 
 app = FastAPI(title="AusPlay API")
+logger = logging.getLogger(__name__)
 room_updates = RoomUpdateManager()
 AUTH_COOKIE_NAME = "ausplay_session"
 AUTH_COOKIE_MAX_AGE = 12 * 60 * 60
@@ -117,6 +125,25 @@ class Credentials(BaseModel):
     username: str
     password: str
     age_confirmed: bool = False
+    display_name: str | None = Field(default=None, min_length=2, max_length=40)
+    email: str | None = Field(default=None, max_length=254)
+
+
+class PlayerProfileUpdate(BaseModel):
+    display_name: str = Field(min_length=2, max_length=40)
+    email: str | None = Field(default=None, max_length=254)
+
+
+class AccountTokenSubmission(BaseModel):
+    token: str = Field(min_length=20, max_length=100)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class PasswordResetCompletion(AccountTokenSubmission):
+    password: str = Field(min_length=8, max_length=128)
 
 
 class PracticeRoomCreate(BaseModel):
@@ -306,6 +333,142 @@ def _require_host(user: models.User) -> models.User:
     return user
 
 
+def _normalize_email(email: str) -> str:
+    normalized = email.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+        raise HTTPException(422, "Enter a valid email address")
+    return normalized
+
+
+def _token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _issue_account_token(
+    db: Session,
+    user: models.User,
+    purpose: str,
+    lifetime: timedelta,
+) -> str:
+    now = models.now()
+    for existing in db.scalars(
+        select(models.AccountToken).where(
+            models.AccountToken.user_id == user.id,
+            models.AccountToken.purpose == purpose,
+            models.AccountToken.used_at.is_(None),
+        )
+    ):
+        existing.used_at = now
+
+    token = secrets.token_urlsafe(32)
+    db.add(
+        models.AccountToken(
+            user_id=user.id,
+            purpose=purpose,
+            token_digest=_token_digest(token),
+            expires_at=now + lifetime,
+        )
+    )
+    db.flush()
+    return token
+
+
+def _consume_account_token(
+    db: Session,
+    token: str,
+    purpose: str,
+) -> tuple[models.AccountToken, models.User]:
+    token_row = db.scalar(
+        select(models.AccountToken).where(
+            models.AccountToken.token_digest == _token_digest(token),
+            models.AccountToken.purpose == purpose,
+            models.AccountToken.used_at.is_(None),
+        )
+    )
+    if token_row is None:
+        raise HTTPException(400, "This link is invalid or has already been used")
+    expires_at = token_row.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(400, "This link has expired")
+    user = db.get(models.User, token_row.user_id)
+    if user is None:
+        raise HTTPException(400, "This link is no longer valid")
+    token_row.used_at = models.now()
+    return token_row, user
+
+
+def _send_account_email(recipient: str, subject: str, body: str) -> None:
+    host = os.getenv("SMTP_HOST")
+    sender = os.getenv("SMTP_FROM_EMAIL")
+    if not host or not sender:
+        raise HTTPException(503, "Email delivery is not configured")
+    try:
+        port = int(os.getenv("SMTP_PORT", "587"))
+    except ValueError as exc:
+        raise HTTPException(503, "SMTP_PORT must be a valid port number") from exc
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = recipient
+    message.set_content(body)
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(
+                host,
+                port,
+                timeout=15,
+                context=ssl.create_default_context(),
+            ) as smtp:
+                _smtp_login(smtp)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as smtp:
+                smtp.starttls(context=ssl.create_default_context())
+                _smtp_login(smtp)
+                smtp.send_message(message)
+    except (OSError, smtplib.SMTPException) as exc:
+        logger.exception("Could not deliver account email")
+        raise HTTPException(503, "Could not send email; try again later") from exc
+
+
+def _smtp_login(smtp: smtplib.SMTP) -> None:
+    username = os.getenv("SMTP_USERNAME")
+    password = os.getenv("SMTP_PASSWORD")
+    if username:
+        smtp.login(username, password or "")
+
+
+def _send_email_verification(db: Session, user: models.User) -> None:
+    if not user.email:
+        raise HTTPException(409, "Add an email address before verifying it")
+    now = models.now()
+    most_recent = db.scalar(
+        select(models.AccountToken.created_at)
+        .where(
+            models.AccountToken.user_id == user.id,
+            models.AccountToken.purpose == "verify_email",
+        )
+        .order_by(models.AccountToken.created_at.desc())
+        .limit(1)
+    )
+    if most_recent:
+        if most_recent.tzinfo is None:
+            most_recent = most_recent.replace(tzinfo=timezone.utc)
+        if now - most_recent < timedelta(minutes=1):
+            raise HTTPException(429, "Wait a minute before requesting another verification email")
+
+    token = _issue_account_token(db, user, "verify_email", timedelta(minutes=30))
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    _send_account_email(
+        user.email,
+        "Verify your AusPlay email",
+        f"Verify your email within 30 minutes:\n\n{frontend_url}/?verify_email={token}",
+    )
+
+
 def current_user(
     cred: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
@@ -313,8 +476,9 @@ def current_user(
 ) -> models.User:
     token = cred.credentials if cred else session_cookie
     uid = read_token(token) if isinstance(token, str) else None
+    version = read_token_version(token) if isinstance(token, str) else None
     user = db.get(models.User, uid) if uid else None
-    if not user:
+    if not user or version != user.auth_version:
         raise HTTPException(401, "Not authenticated")
     return user
 
@@ -327,17 +491,38 @@ def register(body: Credentials, response: Response, db: Session = Depends(get_db
         raise HTTPException(422, "Password must be at least 8 characters")
     if not body.age_confirmed:
         raise HTTPException(422, "You must confirm that you are at least 18")
+    if not body.display_name or not body.email:
+        raise HTTPException(422, "Display name and email are required")
+    display_name = body.display_name.strip()
+    if len(display_name) < 2:
+        raise HTTPException(422, "Display name must contain at least two characters")
+    email = _normalize_email(body.email)
     if db.scalar(select(models.User).where(models.User.username == body.username.lower())):
         raise HTTPException(409, "Username already taken")
-    user = models.User(username=body.username.lower(), password_hash=hash_password(body.password))
+    if db.scalar(select(models.User).where(models.User.email == email)):
+        raise HTTPException(409, "Email address already in use")
+    user = models.User(
+        username=body.username.lower(),
+        display_name=display_name,
+        email=email,
+        password_hash=hash_password(body.password),
+    )
     db.add(user)
-    db.commit()
-    token = make_token(user.id)
+    db.flush()
+    try:
+        _send_email_verification(db, user)
+        db.commit()
+    except (HTTPException, SQLAlchemyError):
+        db.rollback()
+        raise
+    token = make_token(user.id, user.auth_version)
     _set_auth_cookie(response, token)
     return {
         "token": token,
         "username": user.username,
+        "display_name": user.display_name,
         "role": _effective_role(user),
+        "email_verified": False,
     }
 
 
@@ -346,12 +531,14 @@ def login(body: Credentials, response: Response, db: Session = Depends(get_db)):
     user = db.scalar(select(models.User).where(models.User.username == body.username.lower()))
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Wrong username or password")
-    token = make_token(user.id)
+    token = make_token(user.id, user.auth_version)
     _set_auth_cookie(response, token)
     return {
         "token": token,
         "username": user.username,
+        "display_name": user.display_name or user.username,
         "role": _effective_role(user),
+        "email_verified": user.email_verified_at is not None,
     }
 
 
@@ -361,16 +548,140 @@ def logout(response: Response):
     return {"message": "Logged out"}
 
 
+@app.post("/auth/verify-email")
+def verify_email(body: AccountTokenSubmission, db: Session = Depends(get_db)):
+    _, user = _consume_account_token(db, body.token, "verify_email")
+    user.email_verified_at = models.now()
+    db.commit()
+    return {"email_verified": True}
+
+
+@app.post("/auth/password-reset/request")
+def request_password_reset(
+    body: PasswordResetRequest,
+    db: Session = Depends(get_db),
+):
+    email = _normalize_email(body.email)
+    generic_message = "If an account with that verified email exists, recovery instructions will be sent."
+    user = db.scalar(
+        select(models.User).where(
+            models.User.email == email,
+            models.User.email_verified_at.is_not(None),
+        )
+    )
+    if user is None:
+        return {"message": generic_message}
+
+    now = models.now()
+    most_recent = db.scalar(
+        select(models.AccountToken.created_at)
+        .where(
+            models.AccountToken.user_id == user.id,
+            models.AccountToken.purpose == "password_reset",
+        )
+        .order_by(models.AccountToken.created_at.desc())
+        .limit(1)
+    )
+    if most_recent:
+        if most_recent.tzinfo is None:
+            most_recent = most_recent.replace(tzinfo=timezone.utc)
+        if now - most_recent < timedelta(minutes=1):
+            return {"message": generic_message}
+
+    token = _issue_account_token(db, user, "password_reset", timedelta(minutes=30))
+    db.commit()
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    try:
+        _send_account_email(
+            email,
+            "Reset your AusPlay password",
+            f"Reset your password within 30 minutes:\n\n{frontend_url}/?reset_password={token}",
+        )
+    except HTTPException as exc:
+        logger.warning("Password reset email could not be sent: %s", exc.detail)
+    return {"message": generic_message}
+
+
+@app.post("/auth/password-reset/complete")
+def complete_password_reset(
+    body: PasswordResetCompletion,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    _, user = _consume_account_token(db, body.token, "password_reset")
+    user.password_hash = hash_password(body.password)
+    user.auth_version += 1
+    db.commit()
+    _clear_auth_cookie(response)
+    return {"message": "Password reset. Please log in with your new password."}
+
+
 @app.get("/me")
 def me(user: models.User = Depends(current_user)):
-    return {"id": user.id, "username": user.username, "role": _effective_role(user)}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "display_name": user.display_name or user.username,
+        "role": _effective_role(user),
+        "email_verified": user.email_verified_at is not None,
+    }
 
 
-@app.get("/me/profile")
-def my_player_profile(
+@app.put("/me/profile")
+def update_my_player_profile(
+    body: PlayerProfileUpdate,
     user: models.User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    display_name = body.display_name.strip()
+    if len(display_name) < 2:
+        raise HTTPException(422, "Display name must contain at least two characters")
+    normalized_email = _normalize_email(body.email) if body.email else None
+    if normalized_email and db.scalar(
+        select(models.User).where(
+            models.User.email == normalized_email,
+            models.User.id != user.id,
+        )
+    ):
+        raise HTTPException(409, "Email address already in use")
+
+    email_changed = normalized_email != user.email
+    user.display_name = display_name
+    if email_changed:
+        user.email = normalized_email
+        user.email_verified_at = None
+    try:
+        db.flush()
+        if email_changed and user.email:
+            _send_email_verification(db, user)
+        db.commit()
+    except (HTTPException, SQLAlchemyError):
+        db.rollback()
+        raise
+    return {
+        "display_name": user.display_name,
+        "email": user.email,
+        "email_verified": user.email_verified_at is not None,
+    }
+
+
+@app.post("/me/email-verification")
+def resend_email_verification(
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if user.email_verified_at is not None:
+        return {"email_verified": True}
+    try:
+        _send_email_verification(db, user)
+        db.commit()
+    except (HTTPException, SQLAlchemyError):
+        db.rollback()
+        raise
+    return {"email_verified": False, "message": "Verification email sent"}
+
+
+def _build_player_profile(user: models.User, db: Session) -> dict:
     profile_games = (
         ("draughts", "Draughts", models.DraughtsGame),
         ("chess", "Chess", models.ChessGame),
@@ -481,6 +792,7 @@ def my_player_profile(
         "user": {
             "id": user.id,
             "username": user.username,
+            "display_name": user.display_name or user.username,
             "role": _effective_role(user),
             "member_since": user.created_at,
         },
@@ -497,6 +809,29 @@ def my_player_profile(
         ),
         "recent_matches": recent_matches,
     }
+
+
+@app.get("/me/profile")
+def my_player_profile(
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    profile = _build_player_profile(user, db)
+    profile["user"].update(
+        email=user.email,
+        email_verified=user.email_verified_at is not None,
+    )
+    return profile
+
+
+@app.get("/players/{username}/profile")
+def public_player_profile(username: str, db: Session = Depends(get_db)):
+    user = db.scalar(
+        select(models.User).where(models.User.username == username.lower())
+    )
+    if user is None:
+        raise HTTPException(404, "Player profile not found")
+    return _build_player_profile(user, db)
 
 
 @app.get("/rules")
@@ -1024,8 +1359,11 @@ async def room_game_updates(websocket: WebSocket, room_id: int) -> None:
         token = message.get("token") if isinstance(message, dict) else None
 
     user_id = read_token(token) if isinstance(token, str) else None
+    token_version = read_token_version(token) if isinstance(token, str) else None
     with SessionLocal() as db:
         user = db.get(models.User, user_id) if user_id else None
+        if user and token_version != user.auth_version:
+            user = None
         room = db.get(models.PracticeRoom, room_id)
         seat = (
             db.scalar(
@@ -1140,6 +1478,14 @@ def _require_solo_game(game_id: str) -> None:
         raise HTTPException(404, "Solo play is not available for this game")
 
 
+def _player_display_names(db: Session, user_ids: list[int]) -> dict[int, str]:
+    users = db.scalars(select(models.User).where(models.User.id.in_(user_ids))).all()
+    return {
+        user.id: user.display_name or user.username
+        for user in users
+    }
+
+
 def _solo_game_response(
     solo_session: models.SoloGameSession,
     user: models.User,
@@ -1169,6 +1515,10 @@ def _solo_game_response(
     if solo_session.game_id == "chess":
         response["players"] = {
             "white": user.username,
+            "black": computer_name,
+        }
+        response["player_display_names"] = {
+            "white": user.display_name or user.username,
             "black": computer_name,
         }
         response["viewer"]["side"] = "white"
@@ -1387,8 +1737,11 @@ def practice_rooms(
 ):
     token = cred.credentials if cred else session_cookie
     viewer_id = read_token(token) if isinstance(token, str) else None
-    if viewer_id is not None and db.get(models.User, viewer_id) is None:
-        viewer_id = None
+    if viewer_id is not None:
+        viewer = db.get(models.User, viewer_id)
+        token_version = read_token_version(token) if isinstance(token, str) else None
+        if viewer is None or token_version != viewer.auth_version:
+            viewer_id = None
     rows = db.execute(
         select(
             models.PracticeRoom,
@@ -2276,6 +2629,10 @@ def _game_response(
     black_username = db.scalar(
         select(models.User.username).where(models.User.id == game.black_player_id)
     )
+    display_names = _player_display_names(
+        db,
+        [game.red_player_id, game.black_player_id],
+    )
     return {
         "room_id": game.room_id,
         "game_id": "draughts",
@@ -2283,6 +2640,10 @@ def _game_response(
         "version": game.version,
         "state": state,
         "players": {"red": red_username, "black": black_username},
+        "player_display_names": {
+            "red": display_names[game.red_player_id],
+            "black": display_names[game.black_player_id],
+        },
         "viewer": {
             "user_id": user.id,
             "side": side,
@@ -2318,6 +2679,10 @@ def _chess_game_response(
     black_username = db.scalar(
         select(models.User.username).where(models.User.id == game.black_player_id)
     )
+    display_names = _player_display_names(
+        db,
+        [game.white_player_id, game.black_player_id],
+    )
     return {
         "room_id": game.room_id,
         "game_id": "chess",
@@ -2325,6 +2690,10 @@ def _chess_game_response(
         "version": game.version,
         "state": state,
         "players": {"white": white_username, "black": black_username},
+        "player_display_names": {
+            "white": display_names[game.white_player_id],
+            "black": display_names[game.black_player_id],
+        },
         "viewer": {
             "user_id": user.id,
             "side": side,

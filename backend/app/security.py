@@ -20,13 +20,25 @@ def verify_password(pw: str, hashed: str) -> bool:
         return False
 
 
-def make_token(user_id: int) -> str:
+def make_token(user_id: int, auth_version: int = 0) -> str:
     exp = datetime.now(timezone.utc) + timedelta(hours=12)
-    return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm="HS256")
+    return jwt.encode(
+        {"sub": str(user_id), "ver": auth_version, "exp": exp},
+        SECRET_KEY,
+        algorithm="HS256",
+    )
 
 
 def read_token(token: str) -> int | None:
     try:
         return int(jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["sub"])
+    except Exception:
+        return None
+
+
+def read_token_version(token: str) -> int | None:
+    try:
+        claims = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        return int(claims.get("ver", 0))
     except Exception:
         return None

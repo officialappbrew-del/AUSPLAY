@@ -47,6 +47,12 @@ local `.env` file.
    | `SECRET_KEY` | Generate a new, long random secret; do not reuse the development key |
    | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` for initial testing; update with the Vercel site URL in step 5 |
    | `AUTH_COOKIE_SECURE` | `true` for the deployed HTTPS service |
+   | `FRONTEND_URL` | The deployed frontend origin, such as `https://ausplay.vercel.app` |
+   | `SMTP_HOST` | Hostname of your SMTP email provider |
+   | `SMTP_PORT` | Provider SMTP port, commonly `587` or `465` |
+   | `SMTP_USERNAME` | SMTP username, if required by the provider |
+   | `SMTP_PASSWORD` | SMTP password or provider app password; configure only in Render |
+   | `SMTP_FROM_EMAIL` | Verified sender address for AusPlay email |
 
    Generate a local secret if needed with
    `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Add the output only
@@ -253,7 +259,21 @@ page refresh keeps you signed in. If the browser blocks third-party cookies betw
 Vercel and Render domains, use a custom frontend/API domain under the same site or enable
 third-party cookies for the site.
 
-## 6. Verify the deployment
+## 6. Player profiles and account recovery
+
+Configure the SMTP variables above before enabling account registration. New accounts
+provide a display name and email address; registration sends a 30-minute verification
+link. Existing accounts can add an email and display name in their private profile and
+verify that address before using password recovery. Recovery links are single-use and
+expire after 30 minutes. Password reset invalidates existing login sessions.
+
+Other players can open public profiles from player names in rooms and game boards.
+Public profiles include display name, username, match statistics, and recent match
+history; email addresses are never included in public profile responses. Account owners
+can see their own email and verification status. Keep SMTP credentials in Render
+environment settings and never commit them.
+
+## 7. Verify the deployment
 
 1. Open the Vercel URL and confirm the games list loads.
 2. Create an account and log in. If API requests fail, check the browser console and

@@ -1,16 +1,16 @@
 :root { --bg:#0F1720; --surface:#17222E; --text:#F3F4F6; --muted:#A9B6C3; --accent:#F5B83D; }
 * { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,sans-serif; }
+body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 .page { max-width:1120px; margin:0 auto; padding:0 32px; }
 nav { display:flex; justify-content:space-between; align-items:center; padding:32px 0; }
-.logo { font-family:"Space Grotesk",sans-serif; font-size:26px; font-weight:700; }
+.logo { font-family:"Space Grotesk",ui-sans-serif,system-ui,sans-serif; font-size:26px; font-weight:700; }
 .logo b { color:var(--accent); }
 .nav-links { display:flex; gap:24px; align-items:center; }
 .role-badge { border-radius:999px; padding:5px 10px; background:#263c30; color:#98e3b2; font-size:12px; text-transform:capitalize; }
 .hero { padding:96px 0 112px; }
 .eyebrow { color:var(--accent); font-size:12px; font-weight:700; letter-spacing:.16em; margin:0 0 16px; }
-h1 { font-family:"Space Grotesk",sans-serif; font-size:clamp(44px,7vw,72px); line-height:1.04; margin:0 0 24px; }
-h2 { font-family:"Space Grotesk",sans-serif; font-size:36px; margin:0; }
+h1 { font-family:"Space Grotesk",ui-sans-serif,system-ui,sans-serif; font-size:clamp(44px,7vw,72px); line-height:1.04; margin:0 0 24px; }
+h2 { font-family:"Space Grotesk",ui-sans-serif,system-ui,sans-serif; font-size:36px; margin:0; }
 .hero p { color:var(--muted); font-size:20px; margin:0 0 40px; }
 .hero .eyebrow { color:var(--accent); font-size:12px; margin:0 0 20px; }
 .btn { background:var(--accent); color:var(--bg); border:0; font-weight:600; min-height:44px; padding:0 24px; border-radius:8px; cursor:pointer; font-size:16px; }
@@ -83,6 +83,16 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .responsible-card p { color:var(--muted); line-height:1.5; }
 .reminder-setting { max-width:360px; }
 .profile-card { display:flex; flex-direction:column; gap:24px; }
+.profile-edit-form { display:grid; gap:16px; max-width:560px; padding:20px; border:1px solid #2A3949; border-radius:10px; }
+.profile-verified { color:#98e3b2; }
+.profile-unverified { color:var(--accent); }
+.player-profile-link { color:inherit; text-decoration:none; }
+.player-profile-link:hover,.player-profile-link:focus-visible { color:var(--accent); text-decoration:underline; }
+.public-profile { max-width:1120px; margin:0 auto; padding:32px; }
+.public-profile h1 { margin:12px 0; }
+.public-profile .workflow-section { margin-top:32px; }
+.public-profile .card { margin-top:24px; }
+.public-profile .profile-game-stats h3,.public-profile .profile-history h3 { margin-bottom:16px; }
 .profile-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; }
 .profile-heading h3 { margin:0 0 10px; }
 .profile-heading p,.profile-member,.profile-history-note { color:var(--muted); }
@@ -116,6 +126,10 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .game-toolbar h2 { margin:0; }
 .game-layout { display:grid; grid-template-columns:minmax(280px,560px) minmax(220px,1fr); gap:32px; align-items:start; }
 .solo-draughts-layout { display:grid; grid-template-columns:minmax(280px,560px) minmax(220px,1fr); gap:32px; align-items:start; }
+.board-with-players { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.board-player-label { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:40px; padding:8px 12px; border:1px solid #2A3949; border-radius:8px; background:var(--surface); }
+.board-player-label strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.board-player-label span { flex:0 0 auto; color:var(--muted); font-size:12px; text-transform:uppercase; }
 .golf-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(240px,1fr); gap:24px; align-items:start; }
 .golf-scorecard-wrap { min-width:0; }
 .golf-scorecard-wrap h3 { margin:0 0 16px; }

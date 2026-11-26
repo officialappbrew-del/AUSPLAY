@@ -43,6 +43,8 @@ function ActionButton({ loading = false, disabled = false, onClick, children, ..
 function AuthForm({ mode, onDone, onModeChange }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -60,7 +62,7 @@ function AuthForm({ mode, onDone, onModeChange }) {
     setSubmitting(true);
     try {
       const session = mode === "signup"
-        ? await api.register(username, password, ageConfirmed)
+        ? await api.register(username, password, ageConfirmed, displayName, email)
         : await api.login(username, password);
       onDone(session);
     } catch (err) {
@@ -70,9 +72,39 @@ function AuthForm({ mode, onDone, onModeChange }) {
     }
   }
 
+  if (mode === "forgot-password") {
+    return <ForgotPasswordForm onModeChange={onModeChange} />;
+  }
+
   return (
     <form ref={formRef} className="card auth" onSubmit={submit}>
       <h2>{mode === "signup" ? "Create your account" : "Log in"}</h2>
+      {mode === "signup" && (
+        <>
+          <label>
+            Display name
+            <input
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              minLength={2}
+              maxLength={40}
+              autoComplete="name"
+              required
+            />
+          </label>
+          <label>
+            Email address
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              maxLength={254}
+              autoComplete="email"
+              required
+            />
+          </label>
+        </>
+      )}
       <label>
         Username
         <input
@@ -123,6 +155,61 @@ function AuthForm({ mode, onDone, onModeChange }) {
           {mode === "signup" ? "Login" : "Create account"}
         </button>
       </p>
+      {mode === "login" && (
+        <button
+          className="link auth-switch"
+          type="button"
+          onClick={() => onModeChange("forgot-password")}
+        >
+          Forgot password?
+        </button>
+      )}
+    </form>
+  );
+}
+
+function ForgotPasswordForm({ onModeChange }) {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+    try {
+      const result = await api.requestPasswordReset(email);
+      setMessage(result.message);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="card auth" onSubmit={submit}>
+      <h2>Recover your account</h2>
+      <p className="login-prompt">Enter your verified email address to receive a password reset link.</p>
+      <label>
+        Email address
+        <input
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          autoComplete="email"
+          required
+        />
+      </label>
+      {message && <p role="status">{message}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      <ActionButton className="btn" type="submit" loading={submitting}>
+        Send recovery link
+      </ActionButton>
+      <button className="link auth-switch" type="button" onClick={() => onModeChange("login")}>
+        Back to log in
+      </button>
     </form>
   );
 }
@@ -195,7 +282,7 @@ function PracticeRoomChat({ token, roomId }) {
         {messages.length ? messages.map((message) => (
           <div className="chat-message" key={message.id}>
             <div className="chat-message-heading">
-              <strong>{message.username}</strong>
+              <strong><PlayerProfileLink username={message.username} /></strong>
               <time dateTime={message.created_at}>
                 {new Date(message.created_at).toLocaleTimeString([], {
                   hour: "numeric",
@@ -871,7 +958,7 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
         {state.players.map((player) => (
           <div className={`card ludo-player ${player.color}`} key={player.user_id}>
             <div className="ludo-player-heading">
-              <h3>{players[player.color]}</h3>
+              <h3><PlayerProfileLink username={players[player.color]} /></h3>
               <span>{player.color}{player.user_id === viewer.user_id ? " · You" : ""}</span>
             </div>
             <div className="ludo-tokens">
@@ -906,6 +993,29 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
   );
 }
 
+function PlayerProfileLink({ username, children }) {
+  if (!username || username.startsWith("Computer")) return children || username;
+  return (
+    <a
+      className="player-profile-link"
+      href={`/?player=${encodeURIComponent(username)}`}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {children || username}
+    </a>
+  );
+}
+
+function BoardPlayerLabel({ name, username = name, side }) {
+  return (
+    <div className="board-player-label">
+      <strong><PlayerProfileLink username={username}>{name}</PlayerProfileLink></strong>
+      <span>{side}</span>
+    </div>
+  );
+}
+
 function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendingSquare }) {
   const { state, legal_moves: legalMoves, viewer, players } = game;
   const activePlayer = players[state.turn_user_id === state.white_player_id ? "white" : "black"];
@@ -928,31 +1038,43 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
 
   return (
     <div className="game-layout">
-      <div className="chess-board" role="grid" aria-label="Chess board">
-        {state.board.flatMap((row, y) => row.map((piece, x) => {
-          const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
-          const isTarget = targets.some((move) => move.to_x === x && move.to_y === y);
-          const shade = (x + y) % 2 === 1 ? "dark" : "light";
-          return (
-            <ActionButton
-              className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
-              key={`${x}-${y}`}
-              role="gridcell"
-              aria-label={`${piece === "." ? "Empty" : `${piece === piece.toUpperCase() ? "White" : "Black"} ${({
-                k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn",
-              })[piece.toLowerCase()]}`} ${"abcdefgh"[x]}${8 - y}`}
-              onClick={() => onSquareClick(x, y)}
-              loading={pendingSquare?.x === x && pendingSquare?.y === y}
-              disabled={actionPending || !viewer.is_turn || state.status !== "active"}
-            >
-              {piece !== "." && (
-                <span className={`chess-piece ${piece === piece.toUpperCase() ? "white" : "black"}`}>
-                  {glyphs[piece]}
-                </span>
-              )}
-            </ActionButton>
-          );
-        }))}
+      <div className="board-with-players">
+        <BoardPlayerLabel
+          name={game.player_display_names?.black || players.black}
+          username={players.black}
+          side="Black"
+        />
+        <div className="chess-board" role="grid" aria-label="Chess board">
+          {state.board.flatMap((row, y) => row.map((piece, x) => {
+            const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
+            const isTarget = targets.some((move) => move.to_x === x && move.to_y === y);
+            const shade = (x + y) % 2 === 1 ? "dark" : "light";
+            return (
+              <ActionButton
+                className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
+                key={`${x}-${y}`}
+                role="gridcell"
+                aria-label={`${piece === "." ? "Empty" : `${piece === piece.toUpperCase() ? "White" : "Black"} ${({
+                  k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn",
+                })[piece.toLowerCase()]}`} ${"abcdefgh"[x]}${8 - y}`}
+                onClick={() => onSquareClick(x, y)}
+                loading={pendingSquare?.x === x && pendingSquare?.y === y}
+                disabled={actionPending || !viewer.is_turn || state.status !== "active"}
+              >
+                {piece !== "." && (
+                  <span className={`chess-piece ${piece === piece.toUpperCase() ? "white" : "black"}`}>
+                    {glyphs[piece]}
+                  </span>
+                )}
+              </ActionButton>
+            );
+          }))}
+        </div>
+        <BoardPlayerLabel
+          name={game.player_display_names?.white || players.white}
+          username={players.white}
+          side="White"
+        />
       </div>
       <div className="game-info card">
         <p>You are <strong>{players[viewer.side]}</strong> ({viewer.side}).</p>
@@ -1027,7 +1149,7 @@ function GolfScorecard({ game, onSubmitScore, actionPending }) {
                 return (
                   <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={golfer.user_id}>
                     <th scope="row">
-                      {players[golfer.user_id]}
+                      <PlayerProfileLink username={players[golfer.user_id]} />
                       {golfer.user_id === viewer.user_id ? " (you)" : ""}
                     </th>
                     {golfer.scores.map((score, index) => (
@@ -1127,7 +1249,7 @@ function PoloScorecard({ game, onSubmitScore, actionPending }) {
                 return (
                   <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={team.user_id}>
                     <th scope="row">
-                      Team {index === 0 ? "A" : "B"} · {players[team.user_id]}
+                      Team {index === 0 ? "A" : "B"} · <PlayerProfileLink username={players[team.user_id]} />
                       {team.user_id === viewer.user_id ? " (you)" : ""}
                     </th>
                     {team.goals.map((score, scoreIndex) => (
@@ -1233,7 +1355,7 @@ function SnookerScorecard({ game, onSubmitScore, actionPending }) {
                 return (
                   <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={player.user_id}>
                     <th scope="row">
-                      {players[player.user_id]}
+                      <PlayerProfileLink username={players[player.user_id]} />
                       {player.user_id === viewer.user_id ? " (you)" : ""}
                     </th>
                     {player.scores.map((score, index) => (
@@ -1428,7 +1550,10 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
       <div className="whot-players">
         {state.players.map((player) => (
           <div className="card whot-player" key={player.user_id}>
-            <strong>{players[player.user_id]}{player.user_id === viewer.user_id ? " (you)" : ""}</strong>
+            <strong>
+              <PlayerProfileLink username={players[player.user_id]} />
+              {player.user_id === viewer.user_id ? " (you)" : ""}
+            </strong>
             <span>{player.card_count} cards</span>
             {player.user_id === viewer.user_id && (
               <div className="whot-hand" aria-label="Your hand">
@@ -1455,7 +1580,7 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
   );
 }
 
-function SoloDraughts({ token, onClose }) {
+function SoloDraughts({ token, username, displayName, onClose }) {
   const [game, setGame] = useState(createSoloDraughtsGame);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [thinking, setThinking] = useState(false);
@@ -1643,41 +1768,45 @@ function SoloDraughts({ token, onClose }) {
         </div>
       </div>
       <div className="solo-draughts-layout">
-        <div className="draughts-board" aria-label="Solo Draughts board">
-          {game.board.flatMap((row, y) =>
-            row.map((piece, x) => {
-              const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
-              const isTarget = selectedSquare && legalMoves.some(
-                (move) =>
-                  move.from_x === selectedSquare.x
-                  && move.from_y === selectedSquare.y
-                  && move.to_x === x
-                  && move.to_y === y,
-              );
-              const shade = (x + y) % 2 === 1 ? "dark" : "light";
-              const owner = piece === "." ? "Empty" : piece.toLowerCase() === "r" ? "Your" : "System";
-              return (
-                <ActionButton
-                  className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
-                  key={`${x}-${y}`}
-                  aria-label={`${owner} square ${x + 1}, ${y + 1}`}
-                  onClick={() => chooseSquare(x, y)}
-                  disabled={
-                    !progressLoaded
-                    || game.turn !== "player"
-                    || game.status !== "active"
-                    || thinking
-                  }
-                >
-                  {piece !== "." && (
-                    <span className={`piece ${piece.toLowerCase() === "r" ? "red-piece" : "black-piece"}${piece === "R" || piece === "B" ? " king" : ""}`}>
-                      {piece === "R" || piece === "B" ? "K" : ""}
-                    </span>
-                  )}
-                </ActionButton>
-              );
-            })
-          )}
+        <div className="board-with-players">
+          <BoardPlayerLabel name="Computer" side="Black" />
+          <div className="draughts-board" aria-label="Solo Draughts board">
+            {game.board.flatMap((row, y) =>
+              row.map((piece, x) => {
+                const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
+                const isTarget = selectedSquare && legalMoves.some(
+                  (move) =>
+                    move.from_x === selectedSquare.x
+                    && move.from_y === selectedSquare.y
+                    && move.to_x === x
+                    && move.to_y === y,
+                );
+                const shade = (x + y) % 2 === 1 ? "dark" : "light";
+                const owner = piece === "." ? "Empty" : piece.toLowerCase() === "r" ? "Your" : "System";
+                return (
+                  <ActionButton
+                    className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
+                    key={`${x}-${y}`}
+                    aria-label={`${owner} square ${x + 1}, ${y + 1}`}
+                    onClick={() => chooseSquare(x, y)}
+                    disabled={
+                      !progressLoaded
+                      || game.turn !== "player"
+                      || game.status !== "active"
+                      || thinking
+                    }
+                  >
+                    {piece !== "." && (
+                      <span className={`piece ${piece.toLowerCase() === "r" ? "red-piece" : "black-piece"}${piece === "R" || piece === "B" ? " king" : ""}`}>
+                        {piece === "R" || piece === "B" ? "K" : ""}
+                      </span>
+                    )}
+                  </ActionButton>
+                );
+              })
+            )}
+          </div>
+          <BoardPlayerLabel name={displayName || username} username={username} side="Red · You" />
         </div>
         <div className="game-info card" aria-live="polite">
           <p><strong>{statusMessage}</strong></p>
@@ -1954,6 +2083,11 @@ function PlayerProfile({ token }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [sendingVerification, setSendingVerification] = useState(false);
 
   useEffect(() => {
     document.getElementById("player-profile")?.scrollIntoView({ behavior: "smooth" });
@@ -1977,6 +2111,47 @@ function PlayerProfile({ token }) {
       stopped = true;
     };
   }, [token, loadAttempt]);
+
+  useEffect(() => {
+    if (!profile) return;
+    setDisplayName(profile.user.display_name || profile.user.username);
+    setEmail(profile.user.email || "");
+  }, [profile]);
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setSavingProfile(true);
+    setProfileMessage("");
+    try {
+      const updated = await api.updatePlayerProfile(token, displayName, email || null);
+      setProfile((current) => ({
+        ...current,
+        user: { ...current.user, ...updated },
+      }));
+      setProfileMessage(
+        updated.email && !updated.email_verified
+          ? "Profile saved. Check your email to verify it for account recovery."
+          : "Profile saved.",
+      );
+    } catch (saveError) {
+      setProfileMessage(saveError.message);
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function sendVerification() {
+    setSendingVerification(true);
+    setProfileMessage("");
+    try {
+      await api.resendEmailVerification(token);
+      setProfileMessage("Verification email sent. Check your inbox.");
+    } catch (verificationError) {
+      setProfileMessage(verificationError.message);
+    } finally {
+      setSendingVerification(false);
+    }
+  }
 
   return (
     <section className="workflow-section profile-section" id="player-profile">
@@ -2007,11 +2182,54 @@ function PlayerProfile({ token }) {
         <div className="card profile-card">
           <div className="profile-heading">
             <div>
-              <h3>{profile.user.username}</h3>
+              <h3>{profile.user.display_name || profile.user.username}</h3>
+              <p>@{profile.user.username}</p>
               <span className="role-badge">{profile.user.role}</span>
             </div>
-            <p>Your match history is only visible to you.</p>
+            <p>Your email is private. Your match history is visible on your public player profile.</p>
           </div>
+          <form className="profile-edit-form" onSubmit={saveProfile}>
+            <label>
+              Display name
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                minLength={2}
+                maxLength={40}
+                required
+              />
+            </label>
+            <label>
+              Recovery email (private)
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                maxLength={254}
+              />
+            </label>
+            <div className="queue-actions">
+              <ActionButton className="btn" type="submit" loading={savingProfile}>
+                Save profile
+              </ActionButton>
+              {profile.user.email && !profile.user.email_verified && (
+                <ActionButton
+                  className="link"
+                  type="button"
+                  onClick={sendVerification}
+                  loading={sendingVerification}
+                >
+                  Resend verification
+                </ActionButton>
+              )}
+            </div>
+            {profile.user.email && (
+              <span className={profile.user.email_verified ? "profile-verified" : "profile-unverified"}>
+                {profile.user.email_verified ? "Email verified" : "Email not verified"}
+              </span>
+            )}
+            {profileMessage && <p role="status">{profileMessage}</p>}
+          </form>
           <div className="profile-stats">
             {[
               ["Matches", profile.stats.played],
@@ -2082,12 +2300,208 @@ function PlayerProfile({ token }) {
   );
 }
 
-export default function App() {
+const INITIAL_GAMES = [
+  { id: "ludo", name: "Ludo", players: "2-4", playable: true },
+  { id: "whot", name: "Whot", players: "2-4", playable: true },
+  { id: "draughts", name: "Draughts", players: "2", playable: true },
+  { id: "golf", name: "Golf", players: "2-4", playable: true },
+  { id: "chess", name: "Chess", players: "2", playable: true },
+  { id: "polo", name: "Polo", players: "2", playable: true },
+  { id: "snooker", name: "Snooker", players: "2", playable: true },
+];
+
+function PublicPlayerProfile({ username }) {
+  const [profile, setProfile] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let stopped = false;
+    api.getPublicPlayerProfile(username)
+      .then((result) => {
+        if (!stopped) setProfile(result);
+      })
+      .catch((requestError) => {
+        if (!stopped) setError(requestError.message);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [username]);
+
+  return (
+    <main className="public-profile">
+      <a className="link" href="/">Back to AusPlay</a>
+      {error && <p className="error" role="alert">{error}</p>}
+      {!profile && !error && <p role="status">Loading player profile...</p>}
+      {profile && (
+        <section className="workflow-section profile-section">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">AUSPLAY PLAYER</p>
+              <h1>{profile.user.display_name}</h1>
+              <p className="profile-member">@{profile.user.username} · Member since {new Date(profile.user.member_since).toLocaleDateString()}</p>
+            </div>
+            <span className="role-badge">{profile.user.role}</span>
+          </div>
+          <div className="card profile-card">
+            <div className="profile-stats">
+              {[
+                ["Matches", profile.stats.played],
+                ["Wins", profile.stats.wins],
+                ["Draws", profile.stats.draws],
+                ["Losses", profile.stats.losses],
+                ["Win rate", `${profile.stats.win_rate}%`],
+              ].map(([label, value]) => (
+                <div className="profile-stat" key={label}>
+                  <strong>{value}</strong>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="profile-game-stats">
+              <h3>Results by game</h3>
+              {profile.games.some((game) => game.played > 0) ? (
+                <div className="grid">
+                  {profile.games.filter((game) => game.played > 0).map((game) => (
+                    <div className="profile-game-stat" key={game.game_id}>
+                      <strong>{game.name}</strong>
+                      <span>{game.played} played</span>
+                      <small>{game.wins} wins · {game.draws} draws · {game.losses} losses</small>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="login-prompt">No completed matches yet.</p>
+              )}
+            </div>
+            <div className="profile-history">
+              <h3>Recent matches</h3>
+              {profile.recent_matches.map((match) => (
+                <article className="profile-match" key={match.room_id}>
+                  <div className="profile-match-info">
+                    <strong>{match.game_name} · {match.room_name}</strong>
+                    <span>{match.opponents.length ? `Played with ${match.opponents.join(", ")}` : "No opponent recorded"}</span>
+                  </div>
+                  <div className="profile-match-result">
+                    <span className={`profile-result ${match.result}`}>{match.result}</span>
+                    <time dateTime={match.completed_at}>{new Date(match.completed_at).toLocaleString()}</time>
+                  </div>
+                </article>
+              ))}
+              {!profile.recent_matches.length && <p className="login-prompt">No completed matches yet.</p>}
+            </div>
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function EmailVerificationPage({ token }) {
+  const [message, setMessage] = useState("Verifying your email...");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let stopped = false;
+    api.verifyEmail(token)
+      .then(() => {
+        if (!stopped) setMessage("Your email is verified and can now be used for account recovery.");
+      })
+      .catch((verificationError) => {
+        if (!stopped) setError(verificationError.message);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [token]);
+
+  return (
+    <main className="card auth">
+      <h2>Email verification</h2>
+      {error ? <p className="error" role="alert">{error}</p> : <p role="status">{message}</p>}
+      <a className="link" href="/">Return to AusPlay</a>
+    </main>
+  );
+}
+
+function PasswordResetPage({ token }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await api.completePasswordReset(token, password);
+      setMessage(result.message);
+    } catch (resetError) {
+      setError(resetError.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="card auth" onSubmit={submit}>
+      <h2>Choose a new password</h2>
+      {!message ? (
+        <>
+          <label>
+            New password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={8}
+              maxLength={128}
+              autoComplete="new-password"
+              required
+            />
+          </label>
+          <label>
+            Confirm new password
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              minLength={8}
+              maxLength={128}
+              autoComplete="new-password"
+              required
+            />
+          </label>
+          {error && <p className="error" role="alert">{error}</p>}
+          <ActionButton className="btn" type="submit" loading={submitting}>
+            Reset password
+          </ActionButton>
+        </>
+      ) : (
+        <>
+          <p role="status">{message}</p>
+          <a className="btn" href="/?login=1">Log in</a>
+        </>
+      )}
+    </form>
+  );
+}
+
+function HomeApp() {
   const [session, setSession] = useState(null); // { token, username }
   const [authReady, setAuthReady] = useState(false);
-  const [mode, setMode] = useState(null); // "signup" | "login" | null
+  const [mode, setMode] = useState(
+    () => new URLSearchParams(window.location.search).get("login") === "1" ? "login" : null,
+  ); // "signup" | "login" | null
+  const [pendingPlayChoice, setPendingPlayChoice] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [games, setGames] = useState([]);
+  const [games, setGames] = useState(INITIAL_GAMES);
   const [rulebooks, setRulebooks] = useState({});
   const [rooms, setRooms] = useState([]);
   const [wallet, setWallet] = useState(null);
@@ -2140,6 +2554,19 @@ export default function App() {
       stopped = true;
     };
   }, []);
+  useEffect(() => {
+    if (!authReady || !pendingPlayChoice) return;
+    setPendingPlayChoice(null);
+    if (!session) {
+      if (pendingPlayChoice.kind === "solo") setStartSoloAfterAuth(true);
+      setMode("signup");
+    } else if (pendingPlayChoice.kind === "solo") {
+      setSoloGameId(pendingPlayChoice.gameId);
+      setSoloGameOpen(true);
+    } else {
+      document.getElementById("practice-rooms")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [authReady, pendingPlayChoice, session]);
   useEffect(() => {
     if (soloGameOpen) {
       document.getElementById("solo-practice")?.scrollIntoView({ behavior: "smooth" });
@@ -2577,10 +3004,6 @@ export default function App() {
     : "";
 
   function selectGame(game) {
-    if (!authReady) {
-      setNotice("Checking your session. Please try again in a moment.");
-      return;
-    }
     if (!game.playable) {
       setNotice(`${game.name} is coming soon.`);
       return;
@@ -2594,13 +3017,17 @@ export default function App() {
         ? `${game.name} selected. Create a room or join an open room below.`
         : `Sign up or log in to play ${game.name}.`,
     );
-    if (!session) {
+    if (!session && authReady) {
       setMode("signup");
     }
   }
 
   function playSelectedGameWithOthers() {
     setShowSelectedGameOptions(false);
+    if (!authReady) {
+      setPendingPlayChoice({ kind: "others" });
+      return;
+    }
     if (!session) {
       setMode("signup");
       return;
@@ -2611,6 +3038,10 @@ export default function App() {
   function openSoloGame(selectedGameId) {
     setShowSelectedGameOptions(false);
     setSoloGameId(selectedGameId);
+    if (!authReady) {
+      setPendingPlayChoice({ kind: "solo", gameId: selectedGameId });
+      return;
+    }
     if (!session) {
       setStartSoloAfterAuth(true);
       setMode("signup");
@@ -2651,9 +3082,7 @@ export default function App() {
       <nav>
         <span className="logo">Aus<b>Play</b></span>
         <div className="nav-links">
-          {!authReady ? (
-            <span className="login-prompt" role="status">Checking session...</span>
-          ) : session ? (
+          {session ? (
             <>
               <ActionButton
                 className="link username-link"
@@ -2732,7 +3161,12 @@ export default function App() {
 
       {session && soloGameOpen && (
         soloGameId === "draughts" ? (
-          <SoloDraughts token={session.token} onClose={quitSoloGame} />
+          <SoloDraughts
+            token={session.token}
+            username={session.username}
+            displayName={session.display_name}
+            onClose={quitSoloGame}
+          />
         ) : (
           <SoloGame
             token={session.token}
@@ -2748,6 +3182,9 @@ export default function App() {
           onDone={(s) => {
             setSession({ ...s, role: s.role || "player" });
             setMode(null);
+            if (s.email_verified === false) {
+              setNotice("Verify your email in your profile to enable account recovery.");
+            }
             if (startSoloAfterAuth) {
               setStartSoloAfterAuth(false);
               setSoloGameOpen(true);
@@ -2760,7 +3197,7 @@ export default function App() {
           <p className="eyebrow">PLAY FAIR. PLAY TOGETHER.</p>
           <h1>Find your next<br />friendly challenge.</h1>
           <p>Discover games, meet your players, and practise together.</p>
-          {!session && authReady && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
+          {!session && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
           {session && wallet && (
             <p className="wallet">Wallet: NGN {(wallet.available_kobo / 100).toLocaleString()}</p>
           )}
@@ -2884,7 +3321,11 @@ export default function App() {
                   <h3>{room.name}</h3>
                   <span className={`room-status ${room.status}`}>{room.status}</span>
                 </div>
-                <p>{games.find((game) => game.id === room.game_id)?.name || room.game_id} · Hosted by {room.host}</p>
+                <p>
+                  {games.find((game) => game.id === room.game_id)?.name || room.game_id}
+                  {" · Hosted by "}
+                  <PlayerProfileLink username={room.host} />
+                </p>
                 <p>{room.players}/{room.max_players} players</p>
                 <p className="room-rules">
                   <strong>{rulebooks[room.game_id]?.title || "Game rules"}</strong>
@@ -3004,36 +3445,48 @@ export default function App() {
             />
           ) : (
           <div className="game-layout">
-            <div className="draughts-board" aria-label="Draughts board">
-              {activeGame.state.board.flatMap((row, y) =>
-                row.map((piece, x) => {
-                  const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
-                  const isTarget = selectedSquare && activeGame.legal_moves.some(
-                    (move) =>
-                      move.from_x === selectedSquare.x &&
-                      move.from_y === selectedSquare.y &&
-                      move.to_x === x &&
-                      move.to_y === y
-                  );
-                  const shade = (x + y) % 2 === 1 ? "dark" : "light";
-                  return (
-                    <ActionButton
-                      className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
-                      key={`${x}-${y}`}
-                      aria-label={`${piece === "." ? "Empty" : piece === "r" || piece === "R" ? "Red" : "Black"} square ${x + 1}, ${y + 1}`}
-                      onClick={() => chooseSquare(x, y)}
-                      loading={pendingSquare?.x === x && pendingSquare?.y === y}
-                      disabled={gameActionPending || !activeGame.viewer.is_turn || activeGame.status !== "active"}
-                    >
-                      {piece !== "." && (
-                        <span className={`piece ${piece.toLowerCase() === "r" ? "red-piece" : "black-piece"}${piece === "R" || piece === "B" ? " king" : ""}`}>
-                          {piece === "R" || piece === "B" ? "K" : ""}
-                        </span>
-                      )}
-                    </ActionButton>
-                  );
-                })
-              )}
+            <div className="board-with-players">
+              <BoardPlayerLabel
+                name={activeGame.player_display_names?.black || activeGame.players.black}
+                username={activeGame.players.black}
+                side="Black"
+              />
+              <div className="draughts-board" aria-label="Draughts board">
+                {activeGame.state.board.flatMap((row, y) =>
+                  row.map((piece, x) => {
+                    const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
+                    const isTarget = selectedSquare && activeGame.legal_moves.some(
+                      (move) =>
+                        move.from_x === selectedSquare.x &&
+                        move.from_y === selectedSquare.y &&
+                        move.to_x === x &&
+                        move.to_y === y
+                    );
+                    const shade = (x + y) % 2 === 1 ? "dark" : "light";
+                    return (
+                      <ActionButton
+                        className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
+                        key={`${x}-${y}`}
+                        aria-label={`${piece === "." ? "Empty" : piece === "r" || piece === "R" ? "Red" : "Black"} square ${x + 1}, ${y + 1}`}
+                        onClick={() => chooseSquare(x, y)}
+                        loading={pendingSquare?.x === x && pendingSquare?.y === y}
+                        disabled={gameActionPending || !activeGame.viewer.is_turn || activeGame.status !== "active"}
+                      >
+                        {piece !== "." && (
+                          <span className={`piece ${piece.toLowerCase() === "r" ? "red-piece" : "black-piece"}${piece === "R" || piece === "B" ? " king" : ""}`}>
+                            {piece === "R" || piece === "B" ? "K" : ""}
+                          </span>
+                        )}
+                      </ActionButton>
+                    );
+                  })
+                )}
+              </div>
+              <BoardPlayerLabel
+                name={activeGame.player_display_names?.red || activeGame.players.red}
+                username={activeGame.players.red}
+                side="Red"
+              />
             </div>
             <div className="game-info card">
               <p>You are <strong>{activeGamePlayer}</strong> ({activeGame.viewer.side}).</p>
@@ -3072,4 +3525,16 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+export default function App() {
+  const params = new URLSearchParams(window.location.search);
+  const verificationToken = params.get("verify_email");
+  const resetToken = params.get("reset_password");
+  const playerUsername = params.get("player");
+
+  if (verificationToken) return <EmailVerificationPage token={verificationToken} />;
+  if (resetToken) return <PasswordResetPage token={resetToken} />;
+  if (playerUsername) return <PublicPlayerProfile username={playerUsername} />;
+  return <HomeApp />;
 }

@@ -5,13 +5,14 @@ const BASE = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, "
 const WS_BASE = BASE.replace(/^http/, "ws");
 
 async function request(path, options = {}, token) {
+  const headers = {
+    ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
   const res = await fetch(BASE + path, {
     ...options,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { ...headers, ...options.headers },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -30,16 +31,46 @@ async function request(path, options = {}, token) {
   return data;
 }
 
-export const register = (username, password, ageConfirmed) =>
+export const register = (username, password, ageConfirmed, displayName, email) =>
   request("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ username, password, age_confirmed: ageConfirmed }),
+    body: JSON.stringify({
+      username,
+      password,
+      age_confirmed: ageConfirmed,
+      display_name: displayName,
+      email,
+    }),
   });
 export const login = (username, password) =>
   request("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
 export const logout = (token) => request("/auth/logout", { method: "POST" }, token);
 export const getMe = (token) => request("/me", {}, token);
 export const getPlayerProfile = (token) => request("/me/profile", {}, token);
+export const getPublicPlayerProfile = (username) =>
+  request(`/players/${encodeURIComponent(username)}/profile`);
+export const updatePlayerProfile = (token, displayName, email) =>
+  request("/me/profile", {
+    method: "PUT",
+    body: JSON.stringify({ display_name: displayName, email }),
+  }, token);
+export const resendEmailVerification = (token) =>
+  request("/me/email-verification", { method: "POST" }, token);
+export const verifyEmail = (token) =>
+  request("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+export const requestPasswordReset = (email) =>
+  request("/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+export const completePasswordReset = (token, password) =>
+  request("/auth/password-reset/complete", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
 export const getGames = () => request("/games");
 export const getRulebooks = () => request("/rules");
 export const getResponsiblePlaySettings = (token) =>
