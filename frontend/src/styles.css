@@ -43,7 +43,6 @@ section { padding-bottom:96px; }
 .game-card.selectable:hover { transform:translateY(-3px); border-color:var(--accent); }
 .game-card.selectable:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .game-card.selectable.selected { border-color:var(--accent); }
-.game-action { display:block; margin-top:16px; color:var(--accent); font-size:13px; font-weight:600; }
 .selected-game-options { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; margin-top:24px; padding:18px 22px; border:1px solid #2A3949; border-radius:12px; background:var(--surface); }
 .selected-game-options p { margin:0; color:var(--muted); }
 .selected-game-options .eyebrow { margin-bottom:6px; color:var(--accent); }
@@ -274,8 +273,11 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
   .hero { padding:64px 0 80px; }
   .games-section { padding-top:8px; padding-bottom:40px; }
   .games-section .section-heading { margin-bottom:20px; }
-  .games-section .grid { gap:16px; }
-  .games-section .card { padding:20px; }
+  .games-section .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .games-section .card { padding:12px; }
+  .games-section .game-card h3 { font-size:18px; }
+  .games-section .game-availability { font-size:10px; white-space:nowrap; }
+  .games-section .game-card p { font-size:13px; line-height:1.35; }
   .section-heading { display:block; }
   .section-note { margin-top:14px; }
   .profile-heading,.profile-match { align-items:flex-start; flex-direction:column; }

@@ -8,6 +8,7 @@ import {
   legalSoloDraughtsMoves,
 } from "./soloDraughts";
 import { findDirectionalTarget, getGamepadDirection } from "./gamepadNavigation";
+import { mergeGameCatalogue } from "./gameCatalogue";
 
 function ActionButton({ loading = false, disabled = false, onClick, children, ...props }) {
   const [clickPending, setClickPending] = useState(false);
@@ -2943,7 +2944,9 @@ function HomeApp() {
     : "";
 
   useEffect(() => {
-    api.getGames().then(setGames).catch((err) => setNotice(err.message));
+    api.getGames()
+      .then((serverGames) => setGames(mergeGameCatalogue(serverGames, INITIAL_GAMES)))
+      .catch((err) => setNotice(err.message));
   }, []);
   useEffect(() => {
     let stopped = false;
@@ -3581,7 +3584,6 @@ function HomeApp() {
               <p>
                 {g.description || (g.players === "TBD" ? "Player count to be announced" : `${g.players} players`)}
               </p>
-              {g.playable && <span className="game-action">Create or join a practice room</span>}
             </div>
           ))}
         </div>
