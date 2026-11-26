@@ -1290,6 +1290,70 @@ function SnookerScorecard({ game, onSubmitScore, actionPending }) {
   );
 }
 
+const WHOT_SUIT_NAMES = {
+  circle: "Circle",
+  triangle: "Triangle",
+  cross: "Cross",
+  square: "Square",
+  star: "Star",
+};
+
+function WhotSuitSymbol({ suit }) {
+  let shape;
+  switch (suit) {
+    case "circle":
+      shape = <circle cx="24" cy="24" r="15" />;
+      break;
+    case "triangle":
+      shape = <path d="M24 7 42 39H6L24 7Z" />;
+      break;
+    case "cross":
+      shape = (
+        <path
+          d="m15 8 9 10 9-10 7 7-10 9 10 9-7 7-9-10-9 10-7-7 10-9-10-9 7-7Z"
+          fill="currentColor"
+          stroke="none"
+        />
+      );
+      break;
+    case "square":
+      shape = <rect x="9" y="9" width="30" height="30" rx="2" />;
+      break;
+    case "star":
+      shape = <path d="m24 5 5.7 12 13.2 1.6-9.7 9.1 2.6 13-11.8-6.5-11.8 6.5 2.6-13-9.7-9.1L18.3 17 24 5Z" />;
+      break;
+    default:
+      return null;
+  }
+
+  return (
+    <svg
+      className={`whot-suit-symbol whot-suit-${suit}`}
+      viewBox="0 0 48 48"
+      aria-hidden="true"
+    >
+      {shape}
+    </svg>
+  );
+}
+
+function WhotCardFace({ number, suit }) {
+  return (
+    <>
+      <strong>{number}</strong>
+      {suit ? (
+        <WhotSuitSymbol suit={suit} />
+      ) : (
+        <span className="whot-wild-symbol" aria-hidden="true">
+          {Object.keys(WHOT_SUIT_NAMES).map((wildSuit) => (
+            <WhotSuitSymbol key={wildSuit} suit={wildSuit} />
+          ))}
+        </span>
+      )}
+    </>
+  );
+}
+
 function WhotBoard({ game, onPlay, onDraw, actionPending }) {
   const { state, legal_moves: legalMoves, viewer, players, can_draw: canDraw } = game;
   const [chosenSuit, setChosenSuit] = useState("circle");
@@ -1324,9 +1388,14 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
           <span>Cards to draw: {state.draw_pile_count}</span>
         </div>
         <div className="whot-discard">
-          <span className={`whot-card ${state.discard_top.suit || "whot-wild"}`}>
-            <strong>{state.discard_top.number}</strong>
-            <small>{state.discard_top.suit || "WHOT"}</small>
+          <span
+            className={`whot-card ${state.discard_top.suit || "whot-wild"}`}
+            role="img"
+            aria-label={`Top card: ${state.discard_top.suit
+              ? WHOT_SUIT_NAMES[state.discard_top.suit]
+              : "Whot"} ${state.discard_top.number}`}
+          >
+            <WhotCardFace number={state.discard_top.number} suit={state.discard_top.suit} />
           </span>
           <span>Top card</span>
         </div>
@@ -1371,10 +1440,9 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
                       key={card.id}
                       disabled={!playable || actionPending}
                       onClick={() => onPlay(card.id, card.number === 20 ? chosenSuit : undefined)}
-                      aria-label={`${card.suit || "Whot"} ${card.number}`}
+                      aria-label={`${card.suit ? WHOT_SUIT_NAMES[card.suit] : "Whot"} ${card.number}`}
                     >
-                      <strong>{card.number}</strong>
-                      <small>{card.suit || "WHOT"}</small>
+                      <WhotCardFace number={card.number} suit={card.suit} />
                     </ActionButton>
                   );
                 })}
@@ -1468,9 +1536,19 @@ function SoloDraughts({ token, onClose }) {
       .then(({ highest_level: savedLevel }) => {
         if (stopped) return;
         setHighestLevel(savedLevel);
-        if (savedLevel > highestLevel) {
-          setLevel(savedLevel);
-          setProgressMessage(`Level ${savedLevel} unlocked!`);
+        const nextLevel = gameLevel + 1;
+        if (nextLevel <= savedLevel) {
+          setLevel(nextLevel);
+          setGameLevel(nextLevel);
+          setGame(createSoloDraughtsGame());
+          setSelectedSquare(null);
+          setThinking(false);
+          setProgressMessage(
+            savedLevel > highestLevel
+              ? `Level ${savedLevel} unlocked! Starting level ${nextLevel}.`
+              : `Starting level ${nextLevel}.`,
+          );
+          setRound((current) => current + 1);
         } else if (gameLevel === 100) {
           setProgressMessage("You completed the final level!");
         } else {
@@ -1554,8 +1632,14 @@ function SoloDraughts({ token, onClose }) {
           <h2>Draughts vs computer</h2>
         </div>
         <div className="room-actions">
-          <ActionButton className="link" onClick={startNewGame}>New game</ActionButton>
-          <ActionButton className="link" onClick={onClose}>Close</ActionButton>
+          <ActionButton
+            className="link"
+            onClick={startNewGame}
+            disabled={progressSaving}
+          >
+            New game
+          </ActionButton>
+          <ActionButton className="link" onClick={onClose}>Quit game</ActionButton>
         </div>
       </div>
       <div className="solo-draughts-layout">
@@ -1600,7 +1684,7 @@ function SoloDraughts({ token, onClose }) {
           {progressLoaded && (
             <label className="solo-level-picker">
               Level — {highestLevel} of 100 unlocked
-              <select value={level} onChange={chooseLevel}>
+              <select value={level} onChange={chooseLevel} disabled={progressSaving}>
                 {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
                   <option key={unlocked} value={unlocked}>Level {unlocked}</option>
                 ))}
@@ -1755,7 +1839,7 @@ function SoloGame({ token, gameId, onClose }) {
           <h2>{gameName} vs computer</h2>
         </div>
         <div className="room-actions">
-          <ActionButton className="link" onClick={onClose}>Close</ActionButton>
+          <ActionButton className="link" onClick={onClose}>Quit game</ActionButton>
         </div>
       </div>
 
@@ -2019,6 +2103,7 @@ export default function App() {
   const [roomName, setRoomName] = useState("");
   const [gameId, setGameId] = useState("draughts");
   const [selectedGameFilter, setSelectedGameFilter] = useState(null);
+  const [showSelectedGameOptions, setShowSelectedGameOptions] = useState(false);
   const [maxPlayers, setMaxPlayers] = useState(2);
   const [busyRoom, setBusyRoom] = useState(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
@@ -2480,6 +2565,7 @@ export default function App() {
     setGameId(game.id);
     setMaxPlayers(2);
     setSelectedGameFilter(game.id);
+    setShowSelectedGameOptions(true);
     setNotice(
       session
         ? `${game.name} selected. Create a room or join an open room below.`
@@ -2491,6 +2577,7 @@ export default function App() {
   }
 
   function playSelectedGameWithOthers() {
+    setShowSelectedGameOptions(false);
     if (!session) {
       setMode("signup");
       return;
@@ -2499,6 +2586,7 @@ export default function App() {
   }
 
   function openSoloGame(selectedGameId) {
+    setShowSelectedGameOptions(false);
     setSoloGameId(selectedGameId);
     if (!session) {
       setStartSoloAfterAuth(true);
@@ -2515,8 +2603,13 @@ export default function App() {
     setNotice("Game view closed for your break; you can return to the room whenever you’re ready.");
   }
 
+  function quitSoloGame() {
+    setSoloGameOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   return (
-    <div className="page">
+    <div className={`page${showSelectedGameOptions && selectedGame ? " has-mobile-game-options" : ""}${activeGame || soloGameOpen ? " game-focus" : ""}`}>
       <nav>
         <span className="logo">Aus<b>Play</b></span>
         <div className="nav-links">
@@ -2589,7 +2682,7 @@ export default function App() {
             </div>
           ))}
         </div>
-        {selectedGame && (
+        {selectedGame && showSelectedGameOptions && (
           <div className="selected-game-options">
             <div>
               <p className="eyebrow">PLAY {selectedGame.name.toUpperCase()}</p>
@@ -2609,12 +2702,12 @@ export default function App() {
 
       {session && soloGameOpen && (
         soloGameId === "draughts" ? (
-          <SoloDraughts token={session.token} onClose={() => setSoloGameOpen(false)} />
+          <SoloDraughts token={session.token} onClose={quitSoloGame} />
         ) : (
           <SoloGame
             token={session.token}
             gameId={soloGameId}
-            onClose={() => setSoloGameOpen(false)}
+            onClose={quitSoloGame}
           />
         )
       )}
@@ -2701,7 +2794,13 @@ export default function App() {
               Refresh rooms
             </ActionButton>
             {selectedGameFilter && (
-              <ActionButton className="link" onClick={() => setSelectedGameFilter(null)}>
+              <ActionButton
+                className="link"
+                onClick={() => {
+                  setSelectedGameFilter(null);
+                  setShowSelectedGameOptions(false);
+                }}
+              >
                 Show all games
               </ActionButton>
             )}
@@ -2727,6 +2826,7 @@ export default function App() {
                 setGameId(e.target.value);
                 setMaxPlayers(2);
                 setSelectedGameFilter(e.target.value);
+                setShowSelectedGameOptions(true);
               }}>
                 {games.filter((game) => game.playable).map((game) => (
                   <option key={game.id} value={game.id}>{game.name}</option>
@@ -2824,8 +2924,12 @@ export default function App() {
               <p className="eyebrow">FREE PRACTICE MATCH</p>
               <h2>{activeGameName}</h2>
             </div>
-            <ActionButton className="link" onClick={() => { setActiveGame(null); setSelectedSquare(null); }}>
-              Close game
+            <ActionButton className="link" onClick={() => {
+              setActiveGame(null);
+              setSelectedSquare(null);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}>
+              Quit game
             </ActionButton>
           </div>
           {activeGame.game_id === "snooker" ? (
