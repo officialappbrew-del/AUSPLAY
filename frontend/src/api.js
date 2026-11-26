@@ -38,8 +38,8 @@ export const register = (username, password, ageConfirmed, displayName, email) =
       username,
       password,
       age_confirmed: ageConfirmed,
-      display_name: displayName,
-      email,
+      display_name: displayName?.trim() || null,
+      email: email?.trim() || null,
     }),
   });
 export const login = (username, password) =>

@@ -218,7 +218,56 @@ class PlayerProfileTests(unittest.TestCase):
         self.assertEqual(authenticated.username, "cookie_player")
         self.assertEqual(result["token"], token)
         self.assertFalse(result["email_verified"])
+        self.assertTrue(result["email_verification_sent"])
         self.assertIsNotNone(created_user.email_verified_at)
+
+    def test_registration_succeeds_without_optional_display_name_or_email(self):
+        response = Response()
+        with self.session_factory() as db:
+            result = main.register(
+                main.Credentials(
+                    username="optional_profile",
+                    password="password-123",
+                    age_confirmed=True,
+                ),
+                response,
+                db,
+            )
+            created_user = db.scalar(
+                select(models.User).where(models.User.username == "optional_profile")
+            )
+
+        self.assertEqual(result["display_name"], "optional_profile")
+        self.assertFalse(result["email_verification_sent"])
+        self.assertIsNone(created_user.display_name)
+        self.assertIsNone(created_user.email)
+
+    @patch(
+        "app.main._send_account_email",
+        side_effect=HTTPException(503, "Email delivery is not configured"),
+    )
+    def test_registration_and_login_succeed_when_email_delivery_fails(self, send_email):
+        response = Response()
+        with self.session_factory() as db:
+            result = main.register(
+                main.Credentials(
+                    username="smtp_unavailable",
+                    password="password-123",
+                    age_confirmed=True,
+                    email="smtp@example.com",
+                ),
+                response,
+                db,
+            )
+            login_result = main.login(
+                main.Credentials(username="smtp_unavailable", password="password-123"),
+                Response(),
+                db,
+            )
+
+        self.assertFalse(result["email_verification_sent"])
+        self.assertEqual(login_result["username"], "smtp_unavailable")
+        send_email.assert_called_once()
 
     def test_login_sets_http_only_cookie(self):
         response = Response()

@@ -261,11 +261,12 @@ third-party cookies for the site.
 
 ## 6. Player profiles and account recovery
 
-Configure the SMTP variables above before enabling account registration. New accounts
-provide a display name and email address; registration sends a 30-minute verification
-link. Existing accounts can add an email and display name in their private profile and
-verify that address before using password recovery. Recovery links are single-use and
-expire after 30 minutes. Password reset invalidates existing login sessions.
+SMTP is optional for account registration and login. Display name and email are optional
+at signup; accounts are created even when email delivery is unavailable. Configure the
+SMTP variables above to send email verification and password-recovery links. Players can
+add an email and display name in their private profile and verify the address before
+using password recovery. Recovery links are single-use and expire after 30 minutes.
+Password reset invalidates existing login sessions.
 
 Other players can open public profiles from player names in rooms and game boards.
 Public profiles include display name, username, match statistics, and recent match

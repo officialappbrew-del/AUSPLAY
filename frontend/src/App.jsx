@@ -82,25 +82,23 @@ function AuthForm({ mode, onDone, onModeChange }) {
       {mode === "signup" && (
         <>
           <label>
-            Display name
+            Display name (optional)
             <input
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               minLength={2}
               maxLength={40}
               autoComplete="name"
-              required
             />
           </label>
           <label>
-            Email address
+            Email address (optional)
             <input
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               maxLength={254}
               autoComplete="email"
-              required
             />
           </label>
         </>
@@ -3432,8 +3430,10 @@ function HomeApp() {
           onDone={(s) => {
             setSession({ ...s, role: s.role || "player" });
             setMode(null);
-            if (s.email_verified === false) {
-              setNotice("Verify your email in your profile to enable account recovery.");
+            if (mode === "signup" && s.email_verification_sent) {
+              setNotice("Account created. Check your email to verify it and enable account recovery.");
+            } else if (mode === "signup") {
+              setNotice("Account created. Add or verify an email in your profile later to enable account recovery.");
             }
             if (startSoloAfterAuth) {
               setStartSoloAfterAuth(false);

@@ -125,7 +125,7 @@ class Credentials(BaseModel):
     username: str
     password: str
     age_confirmed: bool = False
-    display_name: str | None = Field(default=None, min_length=2, max_length=40)
+    display_name: str | None = Field(default=None, max_length=40)
     email: str | None = Field(default=None, max_length=254)
 
 
@@ -491,15 +491,14 @@ def register(body: Credentials, response: Response, db: Session = Depends(get_db
         raise HTTPException(422, "Password must be at least 8 characters")
     if not body.age_confirmed:
         raise HTTPException(422, "You must confirm that you are at least 18")
-    if not body.display_name or not body.email:
-        raise HTTPException(422, "Display name and email are required")
-    display_name = body.display_name.strip()
-    if len(display_name) < 2:
+    display_name = body.display_name.strip() if body.display_name else None
+    if display_name and len(display_name) < 2:
         raise HTTPException(422, "Display name must contain at least two characters")
-    email = _normalize_email(body.email)
+    email_value = body.email.strip() if body.email else ""
+    email = _normalize_email(email_value) if email_value else None
     if db.scalar(select(models.User).where(models.User.username == body.username.lower())):
         raise HTTPException(409, "Username already taken")
-    if db.scalar(select(models.User).where(models.User.email == email)):
+    if email and db.scalar(select(models.User).where(models.User.email == email)):
         raise HTTPException(409, "Email address already in use")
     user = models.User(
         username=body.username.lower(),
@@ -508,21 +507,36 @@ def register(body: Credentials, response: Response, db: Session = Depends(get_db
         password_hash=hash_password(body.password),
     )
     db.add(user)
-    db.flush()
-    try:
-        _send_email_verification(db, user)
-        db.commit()
-    except (HTTPException, SQLAlchemyError):
-        db.rollback()
-        raise
+    db.commit()
+
+    email_verification_sent = False
+    if user.email:
+        try:
+            _send_email_verification(db, user)
+            db.commit()
+            email_verification_sent = True
+        except HTTPException as exc:
+            db.rollback()
+            logger.warning(
+                "Account created for user id=%s but verification email could not be sent: %s",
+                user.id,
+                exc.detail,
+            )
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception(
+                "Account created for user id=%s but verification token could not be saved",
+                user.id,
+            )
     token = make_token(user.id, user.auth_version)
     _set_auth_cookie(response, token)
     return {
         "token": token,
         "username": user.username,
-        "display_name": user.display_name,
+        "display_name": user.display_name or user.username,
         "role": _effective_role(user),
         "email_verified": False,
+        "email_verification_sent": email_verification_sent,
     }
 
 
