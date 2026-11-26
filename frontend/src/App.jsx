@@ -1168,24 +1168,6 @@ function TurnIndicator({ playerName, isTurn, gameActive = true }) {
   return <span className={`turn-indicator ${state}`} role="img" aria-label={label} title={label} />;
 }
 
-function GameOrientationToggle({ orientation, onChange }) {
-  return (
-    <div className="orientation-toggle" role="group" aria-label="Game view orientation">
-      {["portrait", "landscape"].map((view) => (
-        <button
-          className={orientation === view ? "selected" : ""}
-          key={view}
-          type="button"
-          aria-pressed={orientation === view}
-          onClick={() => onChange(view)}
-        >
-          {view === "portrait" ? "Portrait" : "Landscape"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }) {
   const dialogRef = useRef(null);
 
@@ -1819,7 +1801,7 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
   );
 }
 
-function SoloDraughts({ token, username, displayName, orientation, onOrientationChange, onClose }) {
+function SoloDraughts({ token, username, displayName, onClose }) {
   const [game, setGame] = useState(createSoloDraughtsGame);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [thinking, setThinking] = useState(false);
@@ -2001,7 +1983,7 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
 
   return (
     <section
-      className={`game-section solo-game-section orientation-${orientation}`}
+      className="game-section solo-game-section"
       id="solo-practice"
       aria-label="Solo Draughts"
     >
@@ -2011,7 +1993,6 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
           <h2>Draughts vs computer</h2>
         </div>
         <div className="room-actions">
-          <GameOrientationToggle orientation={orientation} onChange={onOrientationChange} />
           <ActionButton
             className="link"
             onClick={() => setConfirmation("new-game")}
@@ -2157,7 +2138,7 @@ function SoloDraughts({ token, username, displayName, orientation, onOrientation
   );
 }
 
-function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) {
+function SoloGame({ token, gameId, onClose }) {
   const [game, setGame] = useState(null);
   const [level, setLevel] = useState(1);
   const [highestLevel, setHighestLevel] = useState(1);
@@ -2272,7 +2253,7 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
 
   return (
     <section
-      className={`game-section solo-game-section orientation-${orientation}`}
+      className="game-section solo-game-section"
       id="solo-practice"
       aria-label={`Solo ${gameName}`}
     >
@@ -2282,7 +2263,6 @@ function SoloGame({ token, gameId, orientation, onOrientationChange, onClose }) 
           <h2>{gameName} vs computer</h2>
         </div>
         <div className="room-actions">
-          <GameOrientationToggle orientation={orientation} onChange={onOrientationChange} />
           <ActionButton className="link" onClick={() => setConfirmation({ type: "quit" })}>
             Quit game
           </ActionButton>
@@ -2847,7 +2827,6 @@ function HomeApp() {
   const [nextReminderSeconds, setNextReminderSeconds] = useState(60 * 60);
   const [activeGame, setActiveGame] = useState(null);
   const [confirmQuitGame, setConfirmQuitGame] = useState(false);
-  const [boardOrientation, setBoardOrientation] = useState("portrait");
   const [soloGameOpen, setSoloGameOpen] = useState(false);
   const [soloGameId, setSoloGameId] = useState("draughts");
   const [startSoloAfterAuth, setStartSoloAfterAuth] = useState(false);
@@ -3434,7 +3413,6 @@ function HomeApp() {
               >
                 {session.username}
               </ActionButton>
-              <span className="role-badge">{session.role}</span>
               <ActionButton className="link" onClick={logOut}>
                 Log out
               </ActionButton>
@@ -3534,16 +3512,12 @@ function HomeApp() {
             token={session.token}
             username={session.username}
             displayName={session.display_name}
-            orientation={boardOrientation}
-            onOrientationChange={setBoardOrientation}
             onClose={quitSoloGame}
           />
         ) : (
           <SoloGame
             token={session.token}
             gameId={soloGameId}
-            orientation={boardOrientation}
-            onOrientationChange={setBoardOrientation}
             onClose={quitSoloGame}
           />
         )
@@ -3732,7 +3706,7 @@ function HomeApp() {
 
       {activeGame && (
         <section
-          className={`game-section orientation-${boardOrientation}`}
+          className="game-section"
           aria-label={`${activeGameName} game`}
         >
           <div className="game-toolbar">
@@ -3743,10 +3717,6 @@ function HomeApp() {
             <ActionButton className="link" onClick={() => setConfirmQuitGame(true)}>
               Quit game
             </ActionButton>
-            <GameOrientationToggle
-              orientation={boardOrientation}
-              onChange={setBoardOrientation}
-            />
           </div>
           {activeGame.game_id === "snooker" ? (
             <SnookerScorecard
