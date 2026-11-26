@@ -3,7 +3,20 @@
 React (Vite) frontend + FastAPI backend. The current MVP foundation includes account
 registration and login, an adult-age confirmation, a game catalogue, and a practice-room
 lobby where signed-in users can create rooms, join other players, and play server-validated
-Draughts (English checkers), Ludo, or Whot.
+Draughts (English checkers), Chess, Ludo, or Whot, and scorecard simulations for Golf,
+Polo, or Snooker. Each signed-in player can view a private profile with completed match
+history, per-game results, win rate, and solo Draughts progress. Signed-in users can also
+play all seven games against the computer. Chess, Ludo, Whot, Golf, Polo, and Snooker each
+have independent 100-level progression saved to the account; wins unlock the next level.
+Computer opponents make server-side moves in the board and card games, while Golf, Polo,
+and Snooker generate level-based scorecards. Draughts retains its existing solo mode.
+Chess supports standard legal moves, checkmate, castling, en passant, and promotion. Golf is
+played in 2-4 player, nine-hole scorecard matches; players enter their completed strokes in
+turn, and the lowest total wins. Polo is a two-player, four-chukka scorecard match; each
+player represents a team and enters goals in turn. Snooker is a two-player,
+best-of-three frame scorecard; players enter their frame points in turn, and the first to
+two frame wins takes the match. These scorecard games use self-reported scores for friendly
+practice.
 
 For production deployment, follow [DEPLOYMENT.md](./DEPLOYMENT.md).
 
@@ -16,6 +29,14 @@ after the match, and the UI can verify the commitment and recorded rolls. Each c
 32 cryptographically random bytes; the nonce is the game version before the roll. The game
 derives a big-endian HMAC-SHA256 value from `client_seed:nonce:attempt`, rejection-samples it
 without modulo bias, and maps the accepted value to 1-6.
+Chess uses standard chess rules; the server validates every move and records the match.
+Golf uses a fixed nine-hole course (par 36), with server-enforced turn order and stroke
+limits. Scores are entered by players and are not independently verified.
+Polo uses four chukkas, with team goals entered by players in turn; ties are supported and
+scores are not independently verified.
+Snooker uses a best-of-three frame scorecard; players enter break points for each frame,
+and the first to two frame wins takes the match. Frame and match ties are supported.
+These scorecard scores are not independently verified.
 Whot uses a 75-card deck, deals
 five cards, and matches by suit or number. A 1 holds the next player, a 2 or 5 makes the next
 player draw two or three and skip, an 8 skips the next player, a 14 makes each opponent draw
@@ -36,8 +57,9 @@ player, and administrators can resolve or dismiss reports with a note. Report re
 automatically suspend accounts or change match outcomes.
 
 To bootstrap an administrator, first create and verify the account, then run
-`python -m app.admin_cli USERNAME` from the `backend` directory. This local command promotes
-an existing account; there is no public endpoint for granting administrator access.
+`alembic upgrade head` followed by `python -m app.admin_cli USERNAME` from the `backend`
+directory. This local command promotes an existing account; there is no public endpoint
+for granting administrator access.
 
 Signed-in players can choose visible-tab break reminders (30, 60, 90, or 120 minutes, or off).
 These reminders are optional and are not a hard play-time limit. Players can dispute a finished
@@ -56,6 +78,7 @@ python -m venv .venv
 .venv\Scripts\activate        # Windows   (Mac/Linux: source .venv/bin/activate)
 pip install -r requirements.txt
 set SECRET_KEY=change-me      # Mac/Linux: export SECRET_KEY=change-me
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 API docs: http://localhost:8000/docs
@@ -73,4 +96,6 @@ Open http://localhost:5173
    privacy, retention, and compliance review.
 2. Only after legal and provider approval, build a tested double-entry wallet, payments,
    stake settlement, and commission flows.
-3. Add Alembic migrations before launch.
+
+Database schema changes are managed with Alembic. See [DEPLOYMENT.md](./DEPLOYMENT.md)
+for initial setup, existing-database adoption, and the migration workflow.

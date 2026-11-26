@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "./api";
 import { verifyLudoProof } from "./fairness";
+import {
+  applySoloDraughtsMove,
+  chooseComputerMove,
+  createSoloDraughtsGame,
+  legalSoloDraughtsMoves,
+} from "./soloDraughts";
 
 function ActionButton({ loading = false, disabled = false, onClick, children, ...props }) {
   const [clickPending, setClickPending] = useState(false);
@@ -299,7 +305,11 @@ function HostWorkspace({
               Game
               <select value={gameId} onChange={(event) => setGameId(event.target.value)}>
                 <option value="draughts">Draughts</option>
+                <option value="chess">Chess</option>
+                <option value="golf">Golf</option>
                 <option value="ludo">Ludo</option>
+                <option value="polo">Polo</option>
+                <option value="snooker">Snooker</option>
                 <option value="whot">Whot</option>
               </select>
             </label>
@@ -820,7 +830,9 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
           captures do not grant an extra turn, and there is no three-sixes penalty.
         </p>
         <p className="practice-note">
-          Rolls are committed before play. The server seed is revealed when the match ends.
+          {game.solo
+            ? "The computer's dice are generated on the server for solo practice."
+            : "Rolls are committed before play. The server seed is revealed when the match ends."}
         </p>
         {game.fairness?.available ? (
           <div className="fairness-info">
@@ -843,6 +855,8 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
                 </details>
                 {fairnessStatus && <p role="status">{fairnessStatus}</p>}
               </>
+            ) : game.solo ? (
+              <p className="practice-note">Solo practice does not use a multiplayer roll proof.</p>
             ) : (
               <p>Seed reveal is available after the match is finished.</p>
             )}
@@ -887,6 +901,390 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendingSquare }) {
+  const { state, legal_moves: legalMoves, viewer, players } = game;
+  const activePlayer = players[state.turn_user_id === state.white_player_id ? "white" : "black"];
+  const glyphs = {
+    K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+    k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+  };
+  const targets = selectedSquare
+    ? legalMoves.filter((move) => (
+      move.from_x === selectedSquare.x && move.from_y === selectedSquare.y
+    ))
+    : [];
+  const result = state.status === "finished"
+    ? state.winner_user_id
+      ? `${players[state.winner_user_id === state.white_player_id ? "white" : "black"]} wins by checkmate.`
+      : `Draw${state.result ? ` (${state.result})` : ""}.`
+    : viewer.is_turn
+      ? state.check ? "Your move. You are in check." : "Your move."
+      : `Waiting for ${activePlayer}${state.check ? " — in check" : ""}.`;
+
+  return (
+    <div className="game-layout">
+      <div className="chess-board" role="grid" aria-label="Chess board">
+        {state.board.flatMap((row, y) => row.map((piece, x) => {
+          const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
+          const isTarget = targets.some((move) => move.to_x === x && move.to_y === y);
+          const shade = (x + y) % 2 === 1 ? "dark" : "light";
+          return (
+            <ActionButton
+              className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
+              key={`${x}-${y}`}
+              role="gridcell"
+              aria-label={`${piece === "." ? "Empty" : `${piece === piece.toUpperCase() ? "White" : "Black"} ${({
+                k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn",
+              })[piece.toLowerCase()]}`} ${"abcdefgh"[x]}${8 - y}`}
+              onClick={() => onSquareClick(x, y)}
+              loading={pendingSquare?.x === x && pendingSquare?.y === y}
+              disabled={actionPending || !viewer.is_turn || state.status !== "active"}
+            >
+              {piece !== "." && (
+                <span className={`chess-piece ${piece === piece.toUpperCase() ? "white" : "black"}`}>
+                  {glyphs[piece]}
+                </span>
+              )}
+            </ActionButton>
+          );
+        }))}
+      </div>
+      <div className="game-info card">
+        <p>You are <strong>{players[viewer.side]}</strong> ({viewer.side}).</p>
+        <p aria-live="polite">{result}</p>
+        <p>White: {players.white} · Black: {players.black}</p>
+        {state.moves.length > 0 && (
+          <details className="chess-history">
+            <summary>Move history ({state.moves.length})</summary>
+            <ol>
+              {Array.from({ length: Math.ceil(state.moves.length / 2) }, (_, index) => (
+                <li key={index}>
+                  {state.moves[index * 2]?.san}
+                  {state.moves[index * 2 + 1] ? ` · ${state.moves[index * 2 + 1].san}` : ""}
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+        <p className="practice-note">Standard chess rules. Free practice only; no stakes or prizes.</p>
+      </div>
+    </div>
+  );
+}
+
+function GolfScorecard({ game, onSubmitScore, actionPending }) {
+  const { state, players, viewer } = game;
+  const [strokes, setStrokes] = useState(state.pars[state.current_hole - 1] || 4);
+  const golferOnTurn = state.players.find(
+    (player) => player.user_id === state.turn_user_id,
+  );
+  const currentPar = state.pars[state.current_hole - 1] || 4;
+  const winners = state.winner_user_ids.map((userId) => players[userId]);
+
+  useEffect(() => {
+    setStrokes(state.pars[state.current_hole - 1] || 4);
+  }, [game.room_id, state.current_hole]);
+
+  const status = state.status === "finished"
+    ? winners.length > 1
+      ? `Round complete. Tied winners: ${winners.join(", ")}.`
+      : `${winners[0]} wins with the lowest total.`
+    : viewer.is_turn
+      ? `Your turn to enter your strokes for hole ${state.current_hole} (par ${currentPar}).`
+      : `Waiting for ${players[golferOnTurn?.user_id]} to enter a score for hole ${state.current_hole}.`;
+
+  return (
+    <div className="golf-layout">
+      <div className="card golf-scorecard-wrap">
+        <p className="eyebrow">NINE-HOLE STROKE PLAY</p>
+        <h3>Scorecard</h3>
+        <div className="golf-scorecard-scroll">
+          <table className="golf-scorecard">
+            <thead>
+              <tr>
+                <th scope="col">Player</th>
+                {state.pars.map((_, index) => (
+                  <th scope="col" key={index}>{index + 1}</th>
+                ))}
+                <th scope="col">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="golf-par-row">
+                <th scope="row">Par</th>
+                {state.pars.map((par, index) => <td key={index}>{par}</td>)}
+                <td>{state.pars.reduce((sum, par) => sum + par, 0)}</td>
+              </tr>
+              {state.players.map((golfer) => {
+                const recordedScores = golfer.scores.filter((score) => score != null);
+                const total = recordedScores.reduce((sum, score) => sum + score, 0);
+                const isOnTurn = golfer.user_id === state.turn_user_id && state.status === "active";
+                return (
+                  <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={golfer.user_id}>
+                    <th scope="row">
+                      {players[golfer.user_id]}
+                      {golfer.user_id === viewer.user_id ? " (you)" : ""}
+                    </th>
+                    {golfer.scores.map((score, index) => (
+                      <td key={index}>{score ?? "—"}</td>
+                    ))}
+                    <td>{recordedScores.length ? total : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="game-info card golf-controls">
+        <strong aria-live="polite">{status}</strong>
+        <p>
+          {state.status === "active"
+            ? `Hole ${state.current_hole} of ${state.pars.length} · Par ${currentPar}`
+            : `${state.pars.length} holes completed`}
+        </p>
+        {viewer.is_turn && state.status === "active" && (
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            onSubmitScore(Number(strokes));
+          }}>
+            <label>
+              Your completed strokes
+              <input
+                type="number"
+                min="1"
+                max="15"
+                step="1"
+                value={strokes}
+                onChange={(event) => setStrokes(event.target.value)}
+                required
+              />
+            </label>
+            <ActionButton
+              className="btn"
+              type="submit"
+              loading={actionPending}
+              disabled={actionPending || !Number.isInteger(Number(strokes)) || Number(strokes) < 1 || Number(strokes) > 15}
+            >
+              {actionPending ? "Submitting..." : "Submit hole score"}
+            </ActionButton>
+          </form>
+        )}
+        <p className="practice-note">
+          Enter your completed hole score in turn. Scores are self-reported for friendly practice;
+          this is a scorecard simulation, not shot-by-shot golf.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PoloScorecard({ game, onSubmitScore, actionPending }) {
+  const { state, players, viewer } = game;
+  const [goals, setGoals] = useState(0);
+  const teamOnTurn = state.teams.find((team) => team.user_id === state.turn_user_id);
+  const currentTeam = state.teams.find((team) => team.user_id === viewer.user_id);
+  const winners = state.winner_user_ids.map((userId) => players[userId]);
+
+  useEffect(() => {
+    setGoals(0);
+  }, [game.room_id, state.current_chukka, state.turn_user_id]);
+
+  const status = state.status === "finished"
+    ? winners.length > 1
+      ? `Match tied between ${winners.join(" and ")}.`
+      : `${winners[0]} wins the match.`
+    : viewer.is_turn
+      ? `Your turn to enter your team's goals for chukka ${state.current_chukka}.`
+      : `Waiting for ${players[teamOnTurn?.user_id]} to enter their goals for chukka ${state.current_chukka}.`;
+
+  return (
+    <div className="golf-layout">
+      <div className="card golf-scorecard-wrap">
+        <p className="eyebrow">FOUR-CHUKKA MATCH</p>
+        <h3>Polo scorecard</h3>
+        <div className="golf-scorecard-scroll">
+          <table className="golf-scorecard">
+            <thead>
+              <tr>
+                <th scope="col">Team captain</th>
+                {Array.from({ length: state.chukkas }, (_, index) => (
+                  <th scope="col" key={index}>C{index + 1}</th>
+                ))}
+                <th scope="col">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.teams.map((team, index) => {
+                const recordedGoals = team.goals.filter((score) => score != null);
+                const total = recordedGoals.reduce((sum, score) => sum + score, 0);
+                const isOnTurn = team.user_id === state.turn_user_id && state.status === "active";
+                return (
+                  <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={team.user_id}>
+                    <th scope="row">
+                      Team {index === 0 ? "A" : "B"} · {players[team.user_id]}
+                      {team.user_id === viewer.user_id ? " (you)" : ""}
+                    </th>
+                    {team.goals.map((score, scoreIndex) => (
+                      <td key={scoreIndex}>{score ?? "—"}</td>
+                    ))}
+                    <td>{recordedGoals.length ? total : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="game-info card golf-controls">
+        <strong aria-live="polite">{status}</strong>
+        <p>
+          {state.status === "active"
+            ? `Chukka ${state.current_chukka} of ${state.chukkas}`
+            : `${state.chukkas} chukkas completed`}
+        </p>
+        {viewer.is_turn && state.status === "active" && (
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            onSubmitScore(Number(goals));
+          }}>
+            <label>
+              Goals scored by Team {state.turn_index === 0 ? "A" : "B"} this chukka
+              <input
+                type="number"
+                min="0"
+                max="20"
+                step="1"
+                value={goals}
+                onChange={(event) => setGoals(event.target.value)}
+                required
+              />
+            </label>
+            <ActionButton
+              className="btn"
+              type="submit"
+              loading={actionPending}
+              disabled={actionPending || !Number.isInteger(Number(goals)) || Number(goals) < 0 || Number(goals) > 20}
+            >
+              {actionPending ? "Submitting..." : "Submit chukka score"}
+            </ActionButton>
+          </form>
+        )}
+        <p className="practice-note">
+          Each player represents one team and enters goals for their team in turn. Scores are
+          self-reported for friendly practice; this is a scorecard simulation.
+          {currentTeam ? ` You represent Team ${state.teams.indexOf(currentTeam) === 0 ? "A" : "B"}.` : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SnookerScorecard({ game, onSubmitScore, actionPending }) {
+  const { state, players, viewer } = game;
+  const [breakPoints, setBreakPoints] = useState(0);
+  const currentPlayer = state.players.find(
+    (player) => player.user_id === state.turn_user_id,
+  );
+  const winners = state.winner_user_ids.map((userId) => players[userId]);
+  const winner = state.players.find(
+    (player) => player.user_id === state.winner_user_ids[0],
+  );
+  const runnerUp = state.players.find(
+    (player) => player.user_id !== state.winner_user_ids[0],
+  );
+
+  useEffect(() => {
+    setBreakPoints(0);
+  }, [game.room_id, state.current_frame, state.turn_user_id]);
+
+  const status = state.status === "finished"
+    ? winners.length > 1
+      ? `Match tied after ${state.frames} frames.`
+      : `${winners[0]} wins ${winner.frame_wins}-${runnerUp.frame_wins}.`
+    : viewer.is_turn
+      ? `Your turn to enter your points for frame ${state.current_frame}.`
+      : `Waiting for ${players[currentPlayer?.user_id]} to enter their points for frame ${state.current_frame}.`;
+
+  return (
+    <div className="golf-layout">
+      <div className="card golf-scorecard-wrap">
+        <p className="eyebrow">BEST OF THREE FRAMES</p>
+        <h3>Snooker scorecard</h3>
+        <div className="golf-scorecard-scroll">
+          <table className="golf-scorecard">
+            <thead>
+              <tr>
+                <th scope="col">Player</th>
+                {Array.from({ length: state.frames }, (_, index) => (
+                  <th scope="col" key={index}>Frame {index + 1}</th>
+                ))}
+                <th scope="col">Frames won</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.players.map((player) => {
+                const isOnTurn = player.user_id === state.turn_user_id && state.status === "active";
+                return (
+                  <tr className={isOnTurn ? "golf-player-on-turn" : ""} key={player.user_id}>
+                    <th scope="row">
+                      {players[player.user_id]}
+                      {player.user_id === viewer.user_id ? " (you)" : ""}
+                    </th>
+                    {player.scores.map((score, index) => (
+                      <td key={index}>{score ?? "—"}</td>
+                    ))}
+                    <td>{player.frame_wins}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="game-info card golf-controls">
+        <strong aria-live="polite">{status}</strong>
+        <p>
+          {state.status === "active"
+            ? `Frame ${state.current_frame} of ${state.frames} · first to ${state.frames_to_win} frame wins`
+            : `${state.frames} frames maximum`}
+        </p>
+        {viewer.is_turn && state.status === "active" && (
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            onSubmitScore(Number(breakPoints));
+          }}>
+            <label>
+              Your frame points (0-155)
+              <input
+                type="number"
+                min="0"
+                max="155"
+                step="1"
+                value={breakPoints}
+                onChange={(event) => setBreakPoints(event.target.value)}
+                required
+              />
+            </label>
+            <ActionButton
+              className="btn"
+              type="submit"
+              loading={actionPending}
+              disabled={actionPending || !Number.isInteger(Number(breakPoints)) || Number(breakPoints) < 0 || Number(breakPoints) > 155}
+            >
+              {actionPending ? "Submitting..." : "Submit frame score"}
+            </ActionButton>
+          </form>
+        )}
+        <p className="practice-note">
+          Players enter their own frame points in turn. The higher score takes the frame; a tied
+          frame is not awarded. Scores are self-reported for friendly practice, not referee-verified.
+        </p>
       </div>
     </div>
   );
@@ -989,9 +1387,621 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
   );
 }
 
+function SoloDraughts({ token, onClose }) {
+  const [game, setGame] = useState(createSoloDraughtsGame);
+  const [selectedSquare, setSelectedSquare] = useState(null);
+  const [thinking, setThinking] = useState(false);
+  const [level, setLevel] = useState(1);
+  const [gameLevel, setGameLevel] = useState(1);
+  const [highestLevel, setHighestLevel] = useState(1);
+  const [progressLoaded, setProgressLoaded] = useState(false);
+  const [progressLoading, setProgressLoading] = useState(true);
+  const [progressSaving, setProgressSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [progressMessage, setProgressMessage] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [saveAttempt, setSaveAttempt] = useState(0);
+  const [round, setRound] = useState(0);
+  const recordedRound = useRef(null);
+  const legalMoves = legalSoloDraughtsMoves(game, "player");
+
+  useEffect(() => {
+    let stopped = false;
+    setProgressLoading(true);
+    setLoadError("");
+    api.getSoloDraughtsProgress(token)
+      .then(({ highest_level: savedLevel }) => {
+        if (stopped) return;
+        setHighestLevel(savedLevel);
+        setLevel(savedLevel);
+        setGameLevel(savedLevel);
+        setProgressLoaded(true);
+      })
+      .catch((err) => {
+        if (!stopped) setLoadError(err.message);
+      })
+      .finally(() => {
+        if (!stopped) setProgressLoading(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [token, loadAttempt]);
+
+  useEffect(() => {
+    if (
+      !progressLoaded
+      || game.turn !== "system"
+      || game.status !== "active"
+    ) {
+      setThinking(false);
+      return undefined;
+    }
+
+    setThinking(true);
+    const timer = window.setTimeout(() => {
+      setGame((current) => {
+        const move = chooseComputerMove(current, gameLevel);
+        return move ? applySoloDraughtsMove(current, "system", move) : current;
+      });
+      setThinking(false);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [game, gameLevel, progressLoaded]);
+
+  useEffect(() => {
+    if (
+      !progressLoaded
+      || game.status !== "finished"
+      || game.winner !== "player"
+      || recordedRound.current === round
+    ) {
+      return undefined;
+    }
+
+    recordedRound.current = round;
+    let stopped = false;
+    setProgressSaving(true);
+    setSaveError("");
+    api.completeSoloDraughtsLevel(token, gameLevel)
+      .then(({ highest_level: savedLevel }) => {
+        if (stopped) return;
+        setHighestLevel(savedLevel);
+        if (savedLevel > highestLevel) {
+          setLevel(savedLevel);
+          setProgressMessage(`Level ${savedLevel} unlocked!`);
+        } else if (gameLevel === 100) {
+          setProgressMessage("You completed the final level!");
+        } else {
+          setProgressMessage(`Level ${gameLevel} completed.`);
+        }
+      })
+      .catch((err) => {
+        if (!stopped) setSaveError(err.message);
+      })
+      .finally(() => {
+        if (!stopped) setProgressSaving(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [game.status, game.winner, gameLevel, progressLoaded, round, saveAttempt, token]);
+
+  function chooseSquare(x, y) {
+    if (
+      !progressLoaded
+      || game.turn !== "player"
+      || game.status !== "active"
+      || thinking
+    ) return;
+    const move = selectedSquare && legalMoves.find(
+      (candidate) =>
+        candidate.from_x === selectedSquare.x
+        && candidate.from_y === selectedSquare.y
+        && candidate.to_x === x
+        && candidate.to_y === y,
+    );
+    if (move) {
+      setGame((current) => applySoloDraughtsMove(current, "player", move));
+      setSelectedSquare(null);
+      return;
+    }
+
+    if (legalMoves.some((candidate) => candidate.from_x === x && candidate.from_y === y)) {
+      setSelectedSquare({ x, y });
+    } else {
+      setSelectedSquare(null);
+    }
+  }
+
+  function startNewGame() {
+    setGame(createSoloDraughtsGame());
+    setGameLevel(level);
+    setSelectedSquare(null);
+    setThinking(false);
+    setProgressMessage("");
+    setSaveError("");
+    setRound((current) => current + 1);
+  }
+
+  function chooseLevel(event) {
+    const selectedLevel = Number(event.target.value);
+    setLevel(selectedLevel);
+    setGameLevel(selectedLevel);
+    setGame(createSoloDraughtsGame());
+    setSelectedSquare(null);
+    setThinking(false);
+    setProgressMessage("");
+    setSaveError("");
+    setRound((current) => current + 1);
+  }
+
+  const statusMessage = game.status === "finished"
+    ? game.winner === "player" ? `You beat level ${gameLevel}!` : `The system wins. Try level ${gameLevel} again.`
+    : progressLoading ? "Loading your saved level progress..."
+      : !progressLoaded ? "Your levels could not be loaded."
+    : thinking ? "The system is thinking..."
+      : game.turn === "player"
+        ? "Your turn. Select a piece, then a highlighted destination."
+        : "The system's turn.";
+
+  return (
+    <section className="game-section solo-game-section" id="solo-practice" aria-label="Solo Draughts">
+      <div className="game-toolbar">
+        <div>
+          <p className="eyebrow">SOLO PRACTICE · LEVEL {gameLevel}</p>
+          <h2>Draughts vs computer</h2>
+        </div>
+        <div className="room-actions">
+          <ActionButton className="link" onClick={startNewGame}>New game</ActionButton>
+          <ActionButton className="link" onClick={onClose}>Close</ActionButton>
+        </div>
+      </div>
+      <div className="solo-draughts-layout">
+        <div className="draughts-board" aria-label="Solo Draughts board">
+          {game.board.flatMap((row, y) =>
+            row.map((piece, x) => {
+              const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
+              const isTarget = selectedSquare && legalMoves.some(
+                (move) =>
+                  move.from_x === selectedSquare.x
+                  && move.from_y === selectedSquare.y
+                  && move.to_x === x
+                  && move.to_y === y,
+              );
+              const shade = (x + y) % 2 === 1 ? "dark" : "light";
+              const owner = piece === "." ? "Empty" : piece.toLowerCase() === "r" ? "Your" : "System";
+              return (
+                <ActionButton
+                  className={`square ${shade}${isSelected ? " selected" : ""}${isTarget ? " target" : ""}`}
+                  key={`${x}-${y}`}
+                  aria-label={`${owner} square ${x + 1}, ${y + 1}`}
+                  onClick={() => chooseSquare(x, y)}
+                  disabled={
+                    !progressLoaded
+                    || game.turn !== "player"
+                    || game.status !== "active"
+                    || thinking
+                  }
+                >
+                  {piece !== "." && (
+                    <span className={`piece ${piece.toLowerCase() === "r" ? "red-piece" : "black-piece"}${piece === "R" || piece === "B" ? " king" : ""}`}>
+                      {piece === "R" || piece === "B" ? "K" : ""}
+                    </span>
+                  )}
+                </ActionButton>
+              );
+            })
+          )}
+        </div>
+        <div className="game-info card" aria-live="polite">
+          <p><strong>{statusMessage}</strong></p>
+          {progressLoaded && (
+            <label className="solo-level-picker">
+              Level — {highestLevel} of 100 unlocked
+              <select value={level} onChange={chooseLevel}>
+                {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
+                  <option key={unlocked} value={unlocked}>Level {unlocked}</option>
+                ))}
+              </select>
+              <small>Win a level to unlock the next. Changing level starts a new game.</small>
+            </label>
+          )}
+          <p>You play as red. The system plays as black.</p>
+          <p>Captures are mandatory. Continue a multi-jump with the same piece.</p>
+          {progressSaving && <p className="practice-note">Saving your level progress...</p>}
+          {progressMessage && <p className="practice-note">{progressMessage}</p>}
+          {loadError && (
+            <div>
+              <p className="error" role="alert">Could not load your levels: {loadError}</p>
+              <ActionButton className="link" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+                Retry
+              </ActionButton>
+            </div>
+          )}
+          {saveError && (
+            <div>
+              <p className="error" role="alert">
+                Could not save your level progress: {saveError}
+              </p>
+              <ActionButton
+                className="link"
+                onClick={() => {
+                  recordedRound.current = null;
+                  setSaveAttempt((attempt) => attempt + 1);
+                }}
+              >
+                Retry saving
+              </ActionButton>
+            </div>
+          )}
+          <p className="practice-note">Free practice against the computer. An account is required; there are no stakes.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SoloGame({ token, gameId, onClose }) {
+  const [game, setGame] = useState(null);
+  const [level, setLevel] = useState(1);
+  const [highestLevel, setHighestLevel] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedSquare, setSelectedSquare] = useState(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const gameName = gameId.charAt(0).toUpperCase() + gameId.slice(1);
+
+  useEffect(() => {
+    document.getElementById("solo-practice")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    setLoading(true);
+    setError("");
+    api.getCurrentSoloGame(token, gameId)
+      .then(({ session: current, progress }) => {
+        if (stopped) return;
+        setHighestLevel(progress.highest_level);
+        setLevel(current?.status === "active" ? current.level : progress.highest_level);
+        setGame(current);
+      })
+      .catch((err) => {
+        if (!stopped) setError(err.message);
+      })
+      .finally(() => {
+        if (!stopped) setLoading(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [token, gameId, loadAttempt]);
+
+  async function startGame(selectedLevel = level) {
+    setPending(true);
+    setError("");
+    try {
+      const result = await api.startSoloGame(token, gameId, selectedLevel);
+      setHighestLevel(result.progress.highest_level);
+      setLevel(selectedLevel);
+      setGame(result.session);
+      setSelectedSquare(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function submitAction(action) {
+    if (!game) return;
+    setPending(true);
+    setError("");
+    try {
+      const result = await api.submitSoloGameAction(
+        token,
+        gameId,
+        game.solo_session_id,
+        action,
+      );
+      setGame(result.session);
+      setHighestLevel(result.progress.highest_level);
+      setLevel(result.session.level);
+      setSelectedSquare(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function chooseChessSquare(x, y) {
+    if (!game || !game.viewer.is_turn || pending) return;
+    const targetMoves = selectedSquare && game.legal_moves.filter(
+      (move) => move.from_x === selectedSquare.x
+        && move.from_y === selectedSquare.y
+        && move.to_x === x
+        && move.to_y === y,
+    );
+    if (targetMoves?.length) {
+      const move = targetMoves.find((candidate) => candidate.uci.endsWith("q")) || targetMoves[0];
+      void submitAction({ action: "move", uci: move.uci });
+      return;
+    }
+    const canMovePiece = game.legal_moves.some(
+      (move) => move.from_x === x && move.from_y === y,
+    );
+    setSelectedSquare(canMovePiece ? { x, y } : null);
+  }
+
+  const scorecardProps = {
+    game,
+    actionPending: pending,
+    onSubmitScore: (value) => void submitAction({ action: "score", value }),
+  };
+  const levelWon = Boolean(game && (
+    game.state.winner_user_id === game.viewer.user_id
+    || game.state.winner_user_ids?.includes(game.viewer.user_id)
+  ));
+
+  return (
+    <section className="game-section solo-game-section" id="solo-practice" aria-label={`Solo ${gameName}`}>
+      <div className="game-toolbar">
+        <div>
+          <p className="eyebrow">SOLO PRACTICE · LEVEL {game?.level || level}</p>
+          <h2>{gameName} vs computer</h2>
+        </div>
+        <div className="room-actions">
+          <ActionButton className="link" onClick={onClose}>Close</ActionButton>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="login-prompt">Loading your saved solo game...</p>
+      ) : !game || game.status !== "active" ? (
+        <div className="game-info card solo-level-controls">
+          <p>
+            {game?.status === "finished"
+              ? levelWon
+                ? `You won level ${game.level}. ${highestLevel > game.level ? `Level ${game.level + 1} is unlocked.` : "You have reached the highest unlocked level."}`
+                : `Level ${game.level} is finished. Win to unlock the next level.`
+              : `Choose an unlocked level. Level ${highestLevel} is currently your highest.`}
+          </p>
+          <label className="solo-level-picker">
+            Level — {highestLevel} of 100 unlocked
+            <select
+              value={level}
+              onChange={(event) => setLevel(Number(event.target.value))}
+              disabled={pending}
+            >
+              {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
+                <option key={unlocked} value={unlocked}>Level {unlocked}</option>
+              ))}
+            </select>
+          </label>
+          <ActionButton className="btn" onClick={() => void startGame()} disabled={pending}>
+            {pending ? "Starting..." : `Start level ${level}`}
+          </ActionButton>
+        </div>
+      ) : (
+        <>
+          <div className="solo-level-controls card">
+            <strong>Level {game.level} · Computer opponent</strong>
+            <span>
+              {gameId === "golf" || gameId === "polo" || gameId === "snooker"
+                ? "The computer's score is generated for this difficulty level."
+                : "Win to unlock the next level. Each game keeps its own progress."}
+            </span>
+            <label className="solo-level-picker">
+              New game level
+              <select
+                value={level}
+                onChange={(event) => setLevel(Number(event.target.value))}
+                disabled={pending}
+              >
+                {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
+                  <option key={unlocked} value={unlocked}>Level {unlocked}</option>
+                ))}
+              </select>
+            </label>
+            <ActionButton
+              className="link"
+              onClick={() => void startGame(level)}
+              disabled={pending}
+            >
+              Start new game
+            </ActionButton>
+          </div>
+          {gameId === "chess" ? (
+            <ChessBoard
+              game={game}
+              selectedSquare={selectedSquare}
+              onSquareClick={chooseChessSquare}
+              actionPending={pending}
+              pendingSquare={null}
+            />
+          ) : gameId === "ludo" ? (
+            <LudoBoard
+              game={game}
+              onRoll={() => void submitAction({ action: "roll" })}
+              onMove={(tokenIndex) => void submitAction({ action: "token", token_index: tokenIndex })}
+              actionPending={pending}
+            />
+          ) : gameId === "whot" ? (
+            <WhotBoard
+              game={game}
+              onPlay={(cardId, chosenSuit) => void submitAction({
+                action: "play_card",
+                card_id: cardId,
+                chosen_suit: chosenSuit,
+              })}
+              onDraw={() => void submitAction({ action: "draw" })}
+              actionPending={pending}
+            />
+          ) : gameId === "golf" ? (
+            <GolfScorecard {...scorecardProps} />
+          ) : gameId === "polo" ? (
+            <PoloScorecard {...scorecardProps} />
+          ) : (
+            <SnookerScorecard {...scorecardProps} />
+          )}
+        </>
+      )}
+      {error && (
+        <div>
+          <p className="error" role="alert">{error}</p>
+          {!game && (
+            <ActionButton className="link" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+              Retry
+            </ActionButton>
+          )}
+        </div>
+      )}
+      <p className="practice-note">Free practice against the computer. An account is required; there are no stakes.</p>
+    </section>
+  );
+}
+
+function PlayerProfile({ token }) {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  useEffect(() => {
+    document.getElementById("player-profile")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    setLoading(true);
+    setError("");
+    api.getPlayerProfile(token)
+      .then((result) => {
+        if (!stopped) setProfile(result);
+      })
+      .catch((err) => {
+        if (!stopped) setError(err.message);
+      })
+      .finally(() => {
+        if (!stopped) setLoading(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [token, loadAttempt]);
+
+  return (
+    <section className="workflow-section profile-section" id="player-profile">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">YOUR AUSPLAY ACCOUNT</p>
+          <h2>Player profile</h2>
+        </div>
+        {profile && (
+          <p className="profile-member">
+            Member since {new Date(profile.user.member_since).toLocaleDateString()}
+          </p>
+        )}
+      </div>
+      {loading && <p className="login-prompt" role="status">Loading your profile...</p>}
+      {error && (
+        <div className="card profile-card">
+          <p className="error" role="alert">Could not load your profile: {error}</p>
+          <ActionButton
+            className="link"
+            onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          >
+            Retry
+          </ActionButton>
+        </div>
+      )}
+      {profile && !loading && (
+        <div className="card profile-card">
+          <div className="profile-heading">
+            <div>
+              <h3>{profile.user.username}</h3>
+              <span className="role-badge">{profile.user.role}</span>
+            </div>
+            <p>Your match history is only visible to you.</p>
+          </div>
+          <div className="profile-stats">
+            {[
+              ["Matches", profile.stats.played],
+              ["Wins", profile.stats.wins],
+              ["Draws", profile.stats.draws],
+              ["Losses", profile.stats.losses],
+              ["Win rate", `${profile.stats.win_rate}%`],
+            ].map(([label, value]) => (
+              <div className="profile-stat" key={label}>
+                <strong>{value}</strong>
+                <span>{label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="profile-solo-level">
+            <strong>Solo Draughts</strong>
+            <span>Level {profile.solo_draughts_highest_level} unlocked</span>
+          </div>
+          <div className="profile-game-stats">
+            <h3>Results by game</h3>
+            {profile.games.some((game) => game.played > 0) ? (
+              <div className="grid">
+                {profile.games.filter((game) => game.played > 0).map((game) => (
+                  <div className="profile-game-stat" key={game.game_id}>
+                    <strong>{game.name}</strong>
+                    <span>{game.played} played</span>
+                    <small>{game.wins} wins · {game.draws} draws · {game.losses} losses</small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="login-prompt">Finish a practice match to start building your stats.</p>
+            )}
+          </div>
+          <div className="profile-history">
+            <h3>Recent matches</h3>
+            {profile.recent_matches.length ? (
+              <div className="profile-match-list">
+                {profile.recent_matches.map((match) => (
+                  <article className="profile-match" key={match.room_id}>
+                    <div className="profile-match-info">
+                      <strong>{match.game_name} · {match.room_name}</strong>
+                      <span>
+                        {match.opponents.length
+                          ? `Played with ${match.opponents.join(", ")}`
+                          : "No opponent recorded"}
+                      </span>
+                    </div>
+                    <div className="profile-match-result">
+                      <span className={`profile-result ${match.result}`}>{match.result}</span>
+                      <time dateTime={match.completed_at}>
+                        {new Date(match.completed_at).toLocaleString()}
+                      </time>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="login-prompt">Your completed matches will appear here.</p>
+            )}
+            {profile.recent_matches.length === 20 && (
+              <p className="profile-history-note">Showing your 20 most recent completed matches.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(null); // { token, username }
   const [mode, setMode] = useState(null); // "signup" | "login" | null
+  const [profileOpen, setProfileOpen] = useState(false);
   const [games, setGames] = useState([]);
   const [rulebooks, setRulebooks] = useState({});
   const [rooms, setRooms] = useState([]);
@@ -1001,6 +2011,9 @@ export default function App() {
   const [activeSeconds, setActiveSeconds] = useState(0);
   const [nextReminderSeconds, setNextReminderSeconds] = useState(60 * 60);
   const [activeGame, setActiveGame] = useState(null);
+  const [soloGameOpen, setSoloGameOpen] = useState(false);
+  const [soloGameId, setSoloGameId] = useState("draughts");
+  const [startSoloAfterAuth, setStartSoloAfterAuth] = useState(false);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [notice, setNotice] = useState("");
   const [roomName, setRoomName] = useState("");
@@ -1023,6 +2036,11 @@ export default function App() {
   useEffect(() => {
     api.getGames().then(setGames).catch((err) => setNotice(err.message));
   }, []);
+  useEffect(() => {
+    if (soloGameOpen) {
+      document.getElementById("solo-practice")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [soloGameOpen]);
   useEffect(() => {
     api.getRulebooks().then(setRulebooks).catch((err) => setNotice(err.message));
   }, []);
@@ -1321,6 +2339,34 @@ export default function App() {
     setSelectedSquare(ownPiece && canMovePiece ? { x, y } : null);
   }
 
+  function chooseChessSquare(x, y) {
+    if (!activeGame || !activeGame.viewer.is_turn || gameActionPending) return;
+    const targetMoves = selectedSquare && activeGame.legal_moves.filter(
+      (move) => move.from_x === selectedSquare.x
+        && move.from_y === selectedSquare.y
+        && move.to_x === x
+        && move.to_y === y,
+    );
+    if (targetMoves?.length) {
+      const move = targetMoves.find((candidate) => candidate.uci.endsWith("q")) || targetMoves[0];
+      setSelectedSquare(null);
+      setPendingSquare({ x, y });
+      setGameActionPending(true);
+      return api.submitChessMove(session.token, activeGame.room_id, move.uci)
+        .then(setActiveGame)
+        .catch((err) => setNotice(err.message))
+        .finally(() => {
+          setPendingSquare(null);
+          setGameActionPending(false);
+        });
+    }
+
+    const canMovePiece = activeGame.legal_moves.some(
+      (move) => move.from_x === x && move.from_y === y,
+    );
+    setSelectedSquare(canMovePiece ? { x, y } : null);
+  }
+
   async function rollLudo() {
     setGameActionPending(true);
     setNotice("");
@@ -1338,6 +2384,46 @@ export default function App() {
     setNotice("");
     try {
       setActiveGame(await api.moveLudoToken(session.token, activeGame.room_id, tokenIndex));
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setGameActionPending(false);
+    }
+  }
+
+  async function submitGolfScore(strokes) {
+    setGameActionPending(true);
+    setNotice("");
+    try {
+      setActiveGame(await api.submitGolfScore(session.token, activeGame.room_id, strokes));
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setGameActionPending(false);
+    }
+  }
+
+  async function submitPoloScore(goals) {
+    setGameActionPending(true);
+    setNotice("");
+    try {
+      setActiveGame(await api.submitPoloScore(session.token, activeGame.room_id, goals));
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setGameActionPending(false);
+    }
+  }
+
+  async function submitSnookerFrameScore(breakPoints) {
+    setGameActionPending(true);
+    setNotice("");
+    try {
+      setActiveGame(await api.submitSnookerFrameScore(
+        session.token,
+        activeGame.room_id,
+        breakPoints,
+      ));
     } catch (err) {
       setNotice(err.message);
     } finally {
@@ -1374,7 +2460,7 @@ export default function App() {
     }
   }
 
-  const playerOptions = gameId === "draughts" ? [2] : [2, 3, 4];
+  const playerOptions = ["draughts", "chess", "polo", "snooker"].includes(gameId) ? [2] : [2, 3, 4];
   const displayedRooms = selectedGameFilter
     ? rooms.filter((room) => room.game_id === selectedGameFilter)
     : rooms;
@@ -1382,6 +2468,9 @@ export default function App() {
   const activeGamePlayer = activeGame
     ? activeGame.players[activeGame.viewer.side || activeGame.viewer.color]
     : null;
+  const activeGameName = activeGame
+    ? games.find((game) => game.id === activeGame.game_id)?.name || activeGame.game_id
+    : "";
 
   function selectGame(game) {
     if (!game.playable) {
@@ -1396,11 +2485,27 @@ export default function App() {
         ? `${game.name} selected. Create a room or join an open room below.`
         : `Sign up or log in to play ${game.name}.`,
     );
-    if (session) {
-      document.getElementById("practice-rooms")?.scrollIntoView({ behavior: "smooth" });
-    } else {
+    if (!session) {
       setMode("signup");
     }
+  }
+
+  function playSelectedGameWithOthers() {
+    if (!session) {
+      setMode("signup");
+      return;
+    }
+    document.getElementById("practice-rooms")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function openSoloGame(selectedGameId) {
+    setSoloGameId(selectedGameId);
+    if (!session) {
+      setStartSoloAfterAuth(true);
+      setMode("signup");
+      return;
+    }
+    setSoloGameOpen(true);
   }
 
   function takeBreak() {
@@ -1418,8 +2523,28 @@ export default function App() {
           {session ? (
             <>
               <span>{session.username}</span>
+              <ActionButton
+                className="link"
+                aria-expanded={profileOpen}
+                aria-controls="player-profile"
+                onClick={() => setProfileOpen((open) => !open)}
+              >
+                {profileOpen ? "Close profile" : "Profile"}
+              </ActionButton>
               <span className="role-badge">{session.role}</span>
-              <ActionButton className="link" onClick={() => { setSession(null); setNotice(""); setActiveGame(null); }}>Log out</ActionButton>
+              <ActionButton
+                className="link"
+                onClick={() => {
+                  setSession(null);
+                  setProfileOpen(false);
+                  setNotice("");
+                  setActiveGame(null);
+                  setSoloGameOpen(false);
+                  setStartSoloAfterAuth(false);
+                }}
+              >
+                Log out
+              </ActionButton>
             </>
           ) : (
             <>
@@ -1459,17 +2584,52 @@ export default function App() {
                 {g.playable ? "Playable now" : "Coming soon"}
               </span>
               <h3>{g.name}</h3>
-              <p>{g.players} players</p>
+              <p>{g.players === "TBD" ? "Player count to be announced" : `${g.players} players`}</p>
               {g.playable && <span className="game-action">Create or join a practice room</span>}
             </div>
           ))}
         </div>
+        {selectedGame && (
+          <div className="selected-game-options">
+            <div>
+              <p className="eyebrow">PLAY {selectedGame.name.toUpperCase()}</p>
+              <p>Choose how you want to play this game.</p>
+            </div>
+            <div className="selected-game-buttons">
+              <ActionButton className="btn" onClick={playSelectedGameWithOthers}>
+                Play with others
+              </ActionButton>
+              <ActionButton className="btn" onClick={() => openSoloGame(selectedGame.id)}>
+                Play {selectedGame.name} solo vs computer
+              </ActionButton>
+            </div>
+          </div>
+        )}
       </section>
+
+      {session && soloGameOpen && (
+        soloGameId === "draughts" ? (
+          <SoloDraughts token={session.token} onClose={() => setSoloGameOpen(false)} />
+        ) : (
+          <SoloGame
+            token={session.token}
+            gameId={soloGameId}
+            onClose={() => setSoloGameOpen(false)}
+          />
+        )
+      )}
 
       {mode && !session ? (
         <AuthForm
           mode={mode}
-          onDone={(s) => { setSession({ ...s, role: s.role || "player" }); setMode(null); }}
+          onDone={(s) => {
+            setSession({ ...s, role: s.role || "player" });
+            setMode(null);
+            if (startSoloAfterAuth) {
+              setStartSoloAfterAuth(false);
+              setSoloGameOpen(true);
+            }
+          }}
           onModeChange={setMode}
         />
       ) : (
@@ -1485,6 +2645,8 @@ export default function App() {
       )}
 
       {notice && <p className="notice" role="status" aria-live="polite">{notice}</p>}
+
+      {session && profileOpen && <PlayerProfile token={session.token} />}
 
       {session && (
         <ResponsiblePlaySettings
@@ -1655,18 +2817,44 @@ export default function App() {
       {activeGame && (
         <section
           className="game-section"
-          aria-label={`${activeGame.game_id === "ludo" ? "Ludo" : activeGame.game_id === "whot" ? "Whot" : "Draughts"} game`}
+          aria-label={`${activeGameName} game`}
         >
           <div className="game-toolbar">
             <div>
               <p className="eyebrow">FREE PRACTICE MATCH</p>
-              <h2>{activeGame.game_id === "ludo" ? "Ludo" : activeGame.game_id === "whot" ? "Whot" : "Draughts"}</h2>
+              <h2>{activeGameName}</h2>
             </div>
             <ActionButton className="link" onClick={() => { setActiveGame(null); setSelectedSquare(null); }}>
               Close game
             </ActionButton>
           </div>
-          {activeGame.game_id === "ludo" ? (
+          {activeGame.game_id === "snooker" ? (
+            <SnookerScorecard
+              game={activeGame}
+              onSubmitScore={submitSnookerFrameScore}
+              actionPending={gameActionPending}
+            />
+          ) : activeGame.game_id === "polo" ? (
+            <PoloScorecard
+              game={activeGame}
+              onSubmitScore={submitPoloScore}
+              actionPending={gameActionPending}
+            />
+          ) : activeGame.game_id === "golf" ? (
+            <GolfScorecard
+              game={activeGame}
+              onSubmitScore={submitGolfScore}
+              actionPending={gameActionPending}
+            />
+          ) : activeGame.game_id === "chess" ? (
+            <ChessBoard
+              game={activeGame}
+              selectedSquare={selectedSquare}
+              onSquareClick={chooseChessSquare}
+              actionPending={gameActionPending}
+              pendingSquare={pendingSquare}
+            />
+          ) : activeGame.game_id === "ludo" ? (
             <LudoBoard
               game={activeGame}
               onRoll={rollLudo}
@@ -1742,8 +2930,10 @@ export default function App() {
 
       <footer>
         AusPlay by Aus Tech Limited · Adults 18+ only. This MVP offers free practice rooms only;
-        Draughts uses forward-moving men, short kings, and mandatory captures. Ludo uses
-        server-rolled dice, exact finishing rolls, and safe squares. Whot uses a simple documented
+        Chess uses standard server-validated rules. Draughts uses forward-moving men, short kings,
+        and mandatory captures. Golf is a self-reported nine-hole scorecard match. Ludo uses
+        server-rolled dice, exact finishing rolls, and safe squares. Polo uses a self-reported
+        four-chukka scorecard; Snooker uses self-reported frame scores. Whot uses a simple documented
         baseline ruleset. Real-money play, deposits, and prizes are not available.
       </footer>
     </div>

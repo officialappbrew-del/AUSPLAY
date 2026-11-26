@@ -30,6 +30,7 @@ export const register = (username, password, ageConfirmed) =>
 export const login = (username, password) =>
   request("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
 export const getMe = (token) => request("/me", {}, token);
+export const getPlayerProfile = (token) => request("/me/profile", {}, token);
 export const getGames = () => request("/games");
 export const getRulebooks = () => request("/rules");
 export const getResponsiblePlaySettings = (token) =>
@@ -64,6 +65,47 @@ export const submitDraughtsMove = (token, roomId, move) =>
   request(`/rooms/${roomId}/moves`, {
     method: "POST",
     body: JSON.stringify(move),
+  }, token);
+export const submitChessMove = (token, roomId, uci) =>
+  request(`/rooms/${roomId}/chess/moves`, {
+    method: "POST",
+    body: JSON.stringify({ uci }),
+  }, token);
+export const submitGolfScore = (token, roomId, strokes) =>
+  request(`/rooms/${roomId}/golf/scores`, {
+    method: "POST",
+    body: JSON.stringify({ strokes }),
+  }, token);
+export const submitPoloScore = (token, roomId, goals) =>
+  request(`/rooms/${roomId}/polo/scores`, {
+    method: "POST",
+    body: JSON.stringify({ goals }),
+  }, token);
+export const submitSnookerFrameScore = (token, roomId, breakPoints) =>
+  request(`/rooms/${roomId}/snooker/scores`, {
+    method: "POST",
+    body: JSON.stringify({ break_points: breakPoints }),
+  }, token);
+export const getSoloDraughtsProgress = (token) =>
+  request("/solo/draughts/progress", {}, token);
+export const completeSoloDraughtsLevel = (token, level) =>
+  request("/solo/draughts/progress/complete", {
+    method: "POST",
+    body: JSON.stringify({ level }),
+  }, token);
+export const getSoloGameProgress = (token, gameId) =>
+  request(`/solo/${gameId}/progress`, {}, token);
+export const getCurrentSoloGame = (token, gameId) =>
+  request(`/solo/${gameId}/current`, {}, token);
+export const startSoloGame = (token, gameId, level) =>
+  request(`/solo/${gameId}/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ level }),
+  }, token);
+export const submitSoloGameAction = (token, gameId, sessionId, action) =>
+  request(`/solo/${gameId}/sessions/${sessionId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(action),
   }, token);
 export const rollLudoDie = (token, roomId) =>
   request(`/rooms/${roomId}/roll`, {

@@ -38,14 +38,14 @@ local `.env` file.
    - **Root Directory:** `backend`
    - **Runtime:** Python
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - **Start Command:** `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 3. Add these environment variables in the Render service's **Environment** settings:
 
    | Key | Value |
    | --- | --- |
    | `DATABASE_URL` | The private PostgreSQL connection URL from step 2 |
    | `SECRET_KEY` | Generate a new, long random secret; do not reuse the development key |
-   | `CORS_ORIGINS` | `http://localhost:5173` for initial testing; update with the Vercel site URL in step 5 |
+   | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` for initial testing; update with the Vercel site URL in step 5 |
 
    Generate a local secret if needed with
    `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Add the output only
@@ -56,10 +56,137 @@ local `.env` file.
    responding. Do not use the Render dashboard's external database URL if the private
    internal URL is available.
 
-The application creates missing database tables when the backend starts. This is
-sufficient for a new database, but `create_all` is not a schema migration system: it
-does not update existing tables when models change. Add and run Alembic migrations
-before making future schema changes to production data.
+The backend applies Alembic migrations before starting. For a multi-instance service,
+run `alembic upgrade head` once as a pre-deploy/release command rather than from every
+instance's start command.
+
+### Database migrations
+
+Run Alembic commands from `backend/`; it reads `DATABASE_URL` from the root `.env`
+locally and from the service environment in production. Never put a database password
+in `alembic.ini` or commit it to the repository.
+
+Before deploying the new start command to a database previously managed by
+`create_all`, complete the existing-database adoption steps below. Otherwise, the
+initial migration will try to create tables that already exist and the service will
+not start.
+
+For a new, empty database, apply the current schema:
+
+```powershell
+alembic upgrade head
+alembic current
+```
+
+For the first deployment to a database that already has tables from the old
+`create_all` startup behavior:
+
+1. Back up the database and stop writes during the transition.
+   If the database already has an Alembic revision marker, do not stamp it; inspect
+   `alembic current` and apply pending migrations with `alembic upgrade head`.
+2. Verify the backup or a staging clone against the initial migration. On the clone,
+   set `DATABASE_URL` using a secure environment setting (or use a Render shell), then
+   run:
+
+   ```powershell
+   alembic stamp 7f2aa7ab65c2
+   alembic upgrade head
+   alembic check
+   ```
+
+   The initial revision ID is `7f2aa7ab65c2`. Stamp that baseline, not `head`, so
+   migrations added later are still applied. Continue only if `alembic check` reports
+   no schema changes after upgrading the clone.
+3. If the clone matches, record the baseline on the production database without
+   recreating tables, then apply all later migrations:
+
+   ```powershell
+   alembic stamp 7f2aa7ab65c2
+   alembic upgrade head
+   alembic current
+   ```
+
+   `stamp` changes only Alembic's version marker; it does not create, alter, or validate
+   tables. Do not stamp a database with missing or different columns. Reconcile such a
+   schema deliberately, test it on a copy, and verify it before proceeding.
+
+If the backend log reports that `solo_game_sessions` or `solo_game_progress` does not
+exist, the web service is using a database where the solo-games migration has not been
+applied. From the backend directory in the same deployment environment and with the
+same `DATABASE_URL` as the web service, run:
+
+```powershell
+alembic current
+alembic heads
+alembic upgrade head
+alembic current
+```
+
+The current revision should match the single head printed by `alembic heads`. Render's
+start command also runs `alembic upgrade head` before Uvicorn; confirm it is still set to
+`alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT` and check the
+deploy logs for migration errors. If Alembic reports the database is already at head but
+the table is still absent, back up the database and verify that the web service and
+migration command use the same `DATABASE_URL`. The revision marker may have been stamped
+incorrectly; verify the actual schema on a clone and only then reconcile the marker and
+apply migrations. Do not use `stamp head` to work around a missing table; stamping marks
+migrations as applied without creating their tables.
+
+If `alembic upgrade head` fails with `DuplicateTable: relation "users" already exists`,
+the database has existing tables but Alembic is trying to run the initial schema
+migration. Do not retry `upgrade head` or create a new revision yet. After taking a
+backup, check `alembic current`:
+
+- If it shows no revision and this is the legacy database created by the application's
+  former `create_all` startup, verify on a backup or staging clone that its existing
+  schema matches the initial revision. If it does, baseline that existing schema and
+  apply later migrations:
+
+  ```powershell
+  alembic stamp 7f2aa7ab65c2
+  alembic upgrade head
+  alembic current
+  alembic check
+  ```
+
+- If it reports `7f2aa7ab65c2`, run `alembic upgrade head` to apply pending migrations.
+- If it reports another revision, or the schema does not match the initial migration,
+  stop and reconcile the database on a clone first. Do not stamp an unverified schema.
+
+`Target database is not up to date` from `alembic revision --autogenerate` means pending
+migrations must be applied before generating another revision. That command creates a
+new migration; it is not part of repairing the database's migration history.
+
+If Render exits with `alembic: command not found`, Alembic was not installed in the
+deployed environment. Confirm `alembic` is listed in `backend/requirements.txt`, that
+the Render service uses `backend` as its root directory and runs
+`pip install -r requirements.txt`, and that the requirements and migration files have
+been committed and pushed to the branch Render deploys. A package installed only in a
+local virtual environment is not available to Render. Redeploy after pushing the
+dependency change and confirm the build log installs Alembic before the start command
+runs.
+
+For each later schema change, edit the SQLAlchemy models, then create and review a
+migration:
+
+```powershell
+alembic revision --autogenerate -m "describe the schema change"
+alembic upgrade head
+alembic current
+```
+
+Autogeneration is a draft: review the generated file, especially renames, data
+backfills, and destructive changes. Add explicit data migration steps when needed.
+Test upgrades against a disposable database before production. Back up production
+before applying changes. `alembic downgrade -1` can reverse a revision only when its
+downgrade is safe; it is not a substitute for restoring a database backup.
+
+Changing `DATABASE_URL` points the app and Alembic at a different database; migrations
+create the schema there but do not copy user or game data. For a database move, back up
+and restore or migrate the data separately, verify the restored schema, then use
+`alembic current` (or carefully `alembic stamp head` if the restored schema is exactly
+at the current revision). Test the full move on a non-production copy first.
+Run `alembic upgrade head` on a new, empty destination; do not use `stamp` there.
 
 ## 4. Deploy the Vite frontend to Vercel
 
@@ -79,7 +206,7 @@ before making future schema changes to production data.
    Use the URL origin only: do not add `/docs`, an API path, or a trailing slash.
    `VITE_API_URL` is used at build time, so redeploy after changing it.
 4. Deploy and copy the public Vercel URL, for example
-   `https://ausplay.vercel.app`.
+   `https://ausplay.vercel.app/`.
 
 The frontend derives its WebSocket URL from `VITE_API_URL`, using secure WebSockets
 (`wss://`) when the backend URL uses HTTPS. No separate WebSocket URL is needed.
@@ -90,28 +217,43 @@ In the Render backend's environment settings, set `CORS_ORIGINS` to the exact or
 of the deployed Vercel site, including `https://` and without a trailing slash:
 
 ```text
-https://ausplay.vercel.app
+https://ausplay.vercel.app/
 ```
 
 For a custom domain or additional stable frontend origins, list each origin separated
-by commas. For example:
+by commas. Include the exact scheme, hostname, and port used by the browser; `localhost`
+and `127.0.0.1` are different origins. For example:
 
 ```text
-https://ausplay.vercel.app,https://play.example.com
+https://ausplay.vercel.app/,https://play.example.com
 ```
 
 Save the setting and redeploy/restart the Render service. For local development, the
 default remains `http://localhost:5173`. Avoid allowing every origin in production.
+For local development on either hostname, set
+`CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173` in the root `.env`.
+If an `OPTIONS` request returns 400, check the browser's Network panel for the request's
+`Origin` and include that exact origin (including its port) in `CORS_ORIGINS`; restart
+the backend after changing the local `.env`.
 
 ## 6. Verify the deployment
 
 1. Open the Vercel URL and confirm the games list loads.
 2. Create an account and log in. If API requests fail, check the browser console and
    Render logs, then verify `VITE_API_URL`, `DATABASE_URL`, and `CORS_ORIGINS`.
-3. Create and join a practice room with two accounts. Confirm the game updates and room
-   chat work in both browser sessions.
-4. Confirm Render's service URL is HTTPS and that live room updates connect over WSS.
-5. Review Render logs for database connection or startup errors. Never share logs that
+3. Open **Profile** and confirm the account shows its completed-match totals and private
+   history. After playing a completed match, confirm the result and opponent appear.
+4. Create and join a practice room with two accounts. Confirm the game updates and room
+   chat work in both browser sessions. For Chess, verify turns alternate and illegal moves
+   are rejected. For Golf, verify each player enters a score in turn and the match ends
+   after nine holes. For Polo, verify team scores are entered in turn and the match ends
+   after four chukkas. For Snooker, verify frame scores alternate and the first player to
+   two frame wins finishes the match.
+5. Sign in and start solo Chess, Ludo, Whot, Golf, Polo, and Snooker. Confirm each computer
+   takes its turn or submits a scorecard, that a win unlocks the next level for that game
+   only, and that the current solo game survives a page refresh.
+6. Confirm Render's service URL is HTTPS and that live room updates connect over WSS.
+7. Review Render logs for database connection or startup errors. Never share logs that
    contain secrets.
 
 ## Local development
@@ -124,6 +266,7 @@ Start the backend from `backend/`:
 
 ```powershell
 .\.venv\Scripts\activate
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 

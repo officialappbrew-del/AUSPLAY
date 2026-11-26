@@ -42,6 +42,12 @@ section { padding-bottom:96px; }
 .game-card.selectable:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .game-card.selectable.selected { border-color:var(--accent); }
 .game-action { display:block; margin-top:16px; color:var(--accent); font-size:13px; font-weight:600; }
+.selected-game-options { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; margin-top:24px; padding:18px 22px; border:1px solid #2A3949; border-radius:12px; background:var(--surface); }
+.selected-game-options p { margin:0; color:var(--muted); }
+.selected-game-options .eyebrow { margin-bottom:6px; color:var(--accent); }
+.selected-game-buttons { display:flex; flex-wrap:wrap; gap:10px; }
+.solo-level-controls { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-bottom:24px; }
+.solo-level-controls > span { color:var(--muted); }
 .rooms-section { border-top:1px solid #2A3949; padding-top:72px; }
 .room-actions { display:flex; align-items:center; gap:16px; }
 .room-form { display:grid; grid-template-columns:2fr 1.2fr 1fr auto; align-items:end; gap:16px; margin-bottom:32px; }
@@ -76,6 +82,27 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .responsible-card h2 { margin:0; }
 .responsible-card p { color:var(--muted); line-height:1.5; }
 .reminder-setting { max-width:360px; }
+.profile-card { display:flex; flex-direction:column; gap:24px; }
+.profile-heading { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.profile-heading h3 { margin:0 0 10px; }
+.profile-heading p,.profile-member,.profile-history-note { color:var(--muted); }
+.profile-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; }
+.profile-stat,.profile-game-stat,.profile-solo-level { display:flex; flex-direction:column; gap:8px; padding:16px; border:1px solid #2A3949; border-radius:10px; }
+.profile-stat strong { color:var(--accent); font-size:26px; }
+.profile-stat span,.profile-game-stat span,.profile-game-stat small,.profile-solo-level span { color:var(--muted); }
+.profile-solo-level { flex-direction:row; flex-wrap:wrap; justify-content:space-between; }
+.profile-game-stats h3,.profile-history h3 { margin:0 0 16px; }
+.profile-game-stat small { font-size:13px; }
+.profile-match-list { display:flex; flex-direction:column; }
+.profile-match { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:16px 0; border-top:1px solid #2A3949; }
+.profile-match-info,.profile-match-result { display:flex; flex-direction:column; gap:8px; }
+.profile-match-info span,.profile-match-result time { color:var(--muted); font-size:13px; }
+.profile-match-result { align-items:flex-end; text-align:right; }
+.profile-result { font-weight:700; text-transform:capitalize; }
+.profile-result.win { color:#98e3b2; }
+.profile-result.draw { color:var(--accent); }
+.profile-result.loss { color:#ff8a80; }
+.profile-history-note { margin-top:16px !important; font-size:13px; }
 .break-reminder { position:sticky; top:12px; z-index:2; margin:0 0 24px; padding:20px; border:1px solid var(--accent); border-radius:12px; background:#243647; box-shadow:0 8px 24px #0005; }
 .break-reminder p { margin:8px 0 16px; color:var(--muted); }
 .dispute-panel { margin-top:32px; }
@@ -88,7 +115,32 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .game-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
 .game-toolbar h2 { margin:0; }
 .game-layout { display:grid; grid-template-columns:minmax(280px,560px) minmax(220px,1fr); gap:32px; align-items:start; }
+.solo-draughts-layout { display:grid; grid-template-columns:minmax(280px,560px) minmax(220px,1fr); gap:32px; align-items:start; }
+.golf-layout { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(240px,1fr); gap:24px; align-items:start; }
+.golf-scorecard-wrap { min-width:0; }
+.golf-scorecard-wrap h3 { margin:0 0 16px; }
+.golf-scorecard-scroll { overflow-x:auto; }
+.golf-scorecard { width:100%; min-width:640px; border-collapse:collapse; text-align:center; font-variant-numeric:tabular-nums; }
+.golf-scorecard th,.golf-scorecard td { padding:10px 8px; border-bottom:1px solid #2A3949; }
+.golf-scorecard th:first-child { min-width:112px; text-align:left; }
+.golf-scorecard thead th { color:var(--muted); font-size:13px; }
+.golf-scorecard tbody th { overflow-wrap:anywhere; }
+.golf-scorecard .golf-par-row { color:var(--muted); }
+.golf-scorecard .golf-player-on-turn { background:#243647; }
+.golf-controls { gap:16px; }
+.golf-controls strong { line-height:1.5; }
+.golf-controls form { display:grid; gap:16px; }
+.golf-controls .practice-note { color:#98e3b2; font-size:14px; }
+.solo-game-section { scroll-margin-top:16px; }
+.solo-level-picker small { color:var(--muted); line-height:1.4; }
 .draughts-board { display:grid; grid-template-columns:repeat(8,1fr); width:100%; aspect-ratio:1; border:6px solid #263747; border-radius:8px; overflow:hidden; }
+.chess-board { display:grid; grid-template-columns:repeat(8,1fr); width:100%; aspect-ratio:1; border:6px solid #263747; border-radius:8px; overflow:hidden; }
+.chess-piece { font-size:clamp(22px,6vw,56px); line-height:1; text-shadow:0 1px 3px #0008; }
+.chess-piece.white { color:#fff; }
+.chess-piece.black { color:#17222e; }
+.chess-history summary { cursor:pointer; color:var(--accent); }
+.chess-history ol { max-height:220px; overflow:auto; padding-left:24px; color:var(--muted); }
+.chess-history li { margin:6px 0; }
 .square { position:relative; display:grid; place-items:center; aspect-ratio:1; border:0; padding:4%; cursor:pointer; }
 .square.light { background:#d7c6a0; }
 .square.dark { background:#687c8c; }
@@ -176,6 +228,8 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
   .games-section .card { padding:20px; }
   .section-heading { display:block; }
   .section-note { margin-top:14px; }
+  .profile-heading,.profile-match { align-items:flex-start; flex-direction:column; }
+  .profile-match-result { align-items:flex-start; text-align:left; }
   .room-actions { display:block; }
   .room-actions .link { padding-left:0; }
   .room-form { grid-template-columns:1fr; }
@@ -183,6 +237,8 @@ footer { border-top:1px solid #2A3949; padding:32px 0 48px; color:var(--muted); 
   .workflow-form { grid-template-columns:1fr; }
   .workflow-form .full-width { grid-column:auto; }
   .game-layout { grid-template-columns:1fr; }
+  .golf-layout { grid-template-columns:1fr; }
+  .solo-draughts-layout { grid-template-columns:1fr; }
   .ludo-layout { grid-template-columns:1fr; }
   .whot-layout { grid-template-columns:1fr; }
   .whot-hand { justify-content:center; }

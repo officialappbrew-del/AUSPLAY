@@ -63,6 +63,36 @@ class PracticeRoomMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class SoloDraughtsProgress(Base):
+    __tablename__ = "solo_draughts_progress"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    highest_level: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SoloGameProgress(Base):
+    __tablename__ = "solo_game_progress"
+    __table_args__ = (UniqueConstraint("user_id", "game_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    game_id: Mapped[str] = mapped_column(String(24), index=True)
+    highest_level: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SoloGameSession(Base):
+    __tablename__ = "solo_game_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    game_id: Mapped[str] = mapped_column(String(24), index=True)
+    level: Mapped[int] = mapped_column(Integer)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class HostApplication(Base):
     __tablename__ = "host_applications"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -157,6 +187,104 @@ class DraughtsGame(Base):
     version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ChessGame(Base):
+    __tablename__ = "chess_games"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"), unique=True)
+    white_player_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    black_player_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ChessGameEvent(Base):
+    __tablename__ = "chess_game_events"
+    __table_args__ = (UniqueConstraint("game_id", "sequence"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("chess_games.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(24))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class GolfGame(Base):
+    __tablename__ = "golf_games"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"), unique=True)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class GolfGameEvent(Base):
+    __tablename__ = "golf_game_events"
+    __table_args__ = (UniqueConstraint("game_id", "sequence"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("golf_games.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(24))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PoloGame(Base):
+    __tablename__ = "polo_games"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"), unique=True)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PoloGameEvent(Base):
+    __tablename__ = "polo_game_events"
+    __table_args__ = (UniqueConstraint("game_id", "sequence"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("polo_games.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(24))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SnookerGame(Base):
+    __tablename__ = "snooker_games"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"), unique=True)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SnookerGameEvent(Base):
+    __tablename__ = "snooker_game_events"
+    __table_args__ = (UniqueConstraint("game_id", "sequence"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("snooker_games.id"), index=True)
+    sequence: Mapped[int] = mapped_column(Integer)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(24))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class PracticeGameEvent(Base):
