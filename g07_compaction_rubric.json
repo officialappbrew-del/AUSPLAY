@@ -1,0 +1,324 @@
+{
+  "criteria": [
+    {
+      "criteria_id": "criteria_0",
+      "description": "States that plugins declared directly by an active config file must resolve relative to that config file's directory rather than the project root.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_1",
+      "description": "States that plugins declared by a config loaded through `extends` must resolve relative to the extending config file's directory rather than the shareable config package's own location.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_2",
+      "description": "States that ESLint must throw a conflict error when configs active for the same target file load one plugin from different physical locations.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_3",
+      "description": "States that the conflict error names the plugin and both config sources.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_4",
+      "description": "States that no conflict error is thrown when the same plugin resolves to the same physical file across all active configs for a target file.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_5",
+      "description": "States that resolvePluginsRelativeTo sets one shared plugin-resolution directory.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_6",
+      "description": "States that resolvePluginsRelativeTo suppresses conflicts caused by separate local installations.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_7",
+      "description": "States that config files applying to separate non-overlapping targets do not conflict.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_8",
+      "description": "States that each matching file must still produce a lint result.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_9",
+      "description": "States that when a plugin cannot be found and no override is set the error must report the directory of the config file whose plugin lookup failed rather than the process working directory.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_10",
+      "description": "States that changing the plugin installation used for a target must not change which configuration results apply to that target.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_11",
+      "description": "States that users should receive the plugin intended by each configuration, including inherited configurations, with an explicit exception for the --config option which resolves from cwd.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_12",
+      "description": "States that createContext must keep its current filePath result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_13",
+      "description": "States that createContext must keep its current matchBasePath result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_14",
+      "description": "States that createContext must keep its current name result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_15",
+      "description": "States that createContext must keep its current type result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_16",
+      "description": "Records that `createContext` in `lib/cli-engine/config-array-factory.js` takes `{ cwd }` as its first argument rather than a plain directory string.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_17",
+      "description": "Records that `CLIEngine` in `lib/cli-engine/cli-engine.js` accepts `resolvePluginsRelativeTo` as the shared directory override.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_18",
+      "description": "Records that `CascadingConfigArrayFactory` in `lib/cli-engine/cascading-config-array-factory.js` accepts `resolvePluginsRelativeTo`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_19",
+      "description": "States that the conflict message reads `Plugin \"<pluginId>\" was conflicted between \"<importerName1>\" and \"<importerName2>\".`",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_20",
+      "description": "States that the conflict error carries messageTemplate of \"plugin-conflict\".",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_21",
+      "description": "States that the conflict error carries messageData.pluginId holding the plugin identifier string.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_22",
+      "description": "States that `messageData.plugins` holds `{ filePath, importerName }` records listed from higher to lower configuration precedence.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_23",
+      "description": "Records the importerName value as the config file's relative path from cwd for a regular config file.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_24",
+      "description": "Records the importerName value as \"--config\" for a file given through configFile.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_25",
+      "description": "Records the importerName value as \"CLIOptions\" for plugins given through the plugins option.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_26",
+      "description": "Records that _loadPlugin sets relativeToDirectory to resolvePluginsRelativeTo || ctx.matchBasePath.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_27",
+      "description": "Records that the ConfigArrayFactory constructor stores path.resolve(cwd, resolvePluginsRelativeTo) when the override is given.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_28",
+      "description": "Records that checkPluginConflicts(configArray, filePath) was added to lib/cli-engine/cascading-config-array-factory.js.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_29",
+      "description": "Records that getConfigArrayForFile calls checkPluginConflicts before returning.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_30",
+      "description": "Records that messages/plugin-conflict.txt names the plugin.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_31",
+      "description": "Records that messages/plugin-conflict.txt names the filePath of each conflicting record.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_32",
+      "description": "Records that messages/plugin-conflict.txt names the importerName of each conflicting record.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_33",
+      "description": "Records that the plugin-missing `messageData` reports `resolvePluginsRelativeTo: relativeToDirectory`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_34",
+      "description": "Records that the empty fixture `tests/fixtures/config-hierarchy/broken/plugins/node_modules/eslint-plugin-example.js` was added.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_35",
+      "description": "Records that the test was renamed to should load the plugin from the directory of the config file.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_36",
+      "description": "Records that the renamed test expects subdir/node_modules/eslint-plugin-subdir/index.js.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_37",
+      "description": "Records that new plugin-conflict test suites were added to tests/lib/cli-engine/cli-engine.js under executeOnFiles().",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_38",
+      "description": "Records that new plugin-conflict test suites were added to tests/lib/cli-engine/cascading-config-array-factory.js.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_39",
+      "description": "Records that the repository is ESLint `7.0.0-alpha.2`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_40",
+      "description": "Records that defineCascadingConfigArrayFactoryWithInMemoryFileSystem in tests/lib/cli-engine/_utils.js accepts { cwd: () => root, files }.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_41",
+      "description": "Records that defineCascadingConfigArrayFactoryWithInMemoryFileSystem in tests/lib/cli-engine/_utils.js stubs ModuleResolver.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_42",
+      "description": "Records that defineCLIEngineWithInMemoryFileSystem in tests/lib/cli-engine/_utils.js accepts { cwd: () => root, files }.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_43",
+      "description": "Records that defineCLIEngineWithInMemoryFileSystem in tests/lib/cli-engine/_utils.js stubs ModuleResolver.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_44",
+      "description": "States that `bin/eslint.js` renders `../messages/${err.messageTemplate}.txt` through `lodash.template`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_45",
+      "description": "States that `resolvePluginsRelativeTo` defaults to `cwd` in the `CascadingConfigArrayFactory` constructor.",
+      "metadata": { "category": "Artifact preservation", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_46",
+      "description": "Explains that `ctx.matchBasePath` was locked as the plugin resolution base when no override is set because it survives the `{ ...ctx, filePath, name }` spread and keeps `extends` plugins on the extending config file's directory.",
+      "metadata": { "category": "Decision rationale", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_47",
+      "description": "Explains that `ctx.filePath` was rejected as the resolution base because a decoy plugin copy inside a shareable config package would win.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_48",
+      "description": "Explains that a new context field was rejected because the required `createContext` parameters name no such field.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_49",
+      "description": "Records that checkPluginConflicts walks elements last-to-first for highest precedence first.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_50",
+      "description": "Records that checkPluginConflicts skips elements failing element.criteria.test(filePath).",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_51",
+      "description": "Records that checkPluginConflicts skips plugin records with no filePath.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_52",
+      "description": "Records that checkPluginConflicts keeps the first record per plugin id.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_53",
+      "description": "Records that checkPluginConflicts throws when a later record has a different filePath.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_54",
+      "description": "Explains that the permanent conflict tests use try/catch with `assert.fail(\"Expected to throw an error\")` rather than `assert.throws` because this repo's chai rejects function matchers with `TypeError: errorLike is not a constructor`.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_55",
+      "description": "Explains that the cascading suite's same-physical-file test defines a second `files` object without the `subdir` plugin copy rather than nulling one entry because `initFiles` in `tests/lib/cli-engine/_utils.js` recurses into any object value and would throw on `null`.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_56",
+      "description": "Explains that the old project-root plugin test was rewritten because it asserted old behavior.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_57",
+      "description": "Records that the `shared` fixtures under `tests/fixtures/config-hierarchy` use `extends` and not plugins so the conflict check does not affect them.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_58",
+      "description": "Records that under matchBasePath the --config file's plugins resolve from cwd via basePath: cwd.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_59",
+      "description": "Records that CLIOptions plugins resolve from cwd because they carry no filePath.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_60",
+      "description": "Records that the implementation edits are complete.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_61",
+      "description": "Records that the test edits are complete except for the failing resolvePluginsRelativeTo test in tests/lib/cli-engine/cli-engine.js.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_62",
+      "description": "Contains at most 16600 characters.",
+      "metadata": { "category": "Compression efficiency", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_63",
+      "description": "Organizes related facts so that the outstanding failing test and the remaining work can be found without reading the whole summary.",
+      "metadata": { "category": "Structural clarity", "weight": "minor" }
+    }
+  ]
+}

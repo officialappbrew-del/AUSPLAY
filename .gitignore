@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node and deployment tooling
+node_modules/
+dist/
+.vercel/
+
+# Local database files
+*.db
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+frontend/node_modules/
+backend/.venv/

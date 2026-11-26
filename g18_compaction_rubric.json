@@ -1,0 +1,572 @@
+{
+  "criteria": [
+    {
+      "criteria_id": "criteria_0",
+      "description": "States the objective of implementing Request.priority support in FastDeploy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_1",
+      "description": "States that the new priority tests must pass before the task is complete.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_2",
+      "description": "States that `fcfs` is the default scheduling policy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_3",
+      "description": "States that a policy switch must not change `max_num_seqs` accounting.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_4",
+      "description": "States that a running request must not be preempted for a sequence-capacity-blocked waiting request.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_5",
+      "description": "States that under the `fcfs` policy waiting requests are reordered by priority.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "negative"
+      }
+    },
+    {
+      "criteria_id": "criteria_6",
+      "description": "States that `Request.priority` defaults to `0` when priority is `None` or absent.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_7",
+      "description": "States that to_dict includes Request priority.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_8",
+      "description": "States that LocalScheduler priority insertion occurs before the first larger priority.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_9",
+      "description": "States that priority insertion in `LocalScheduler` respects `ids_read_cursor`.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_10",
+      "description": "States that `_waiting_precedence_key` orders waiting requests by the pair of priority and arrival time in ascending order.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_12",
+      "description": "States that `_select_preempt_candidate` can select the requester or a strictly lower-precedence `RUNNING_DECODE` request as a victim.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_13",
+      "description": "States that `get_waiting_request_ids` returns waiting request ids in precedence order after acquiring the lock and calling `_sync_waiting_order()`.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_14",
+      "description": "States that `add_request` calls `apply_async_preprocess` under the lock before inserting a request.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_16",
+      "description": "States that the priority check in `valid_parameters` runs before the `max_tokens` check.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_17",
+      "description": "States that ParameterError subclasses Exception rather than ValueError.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_19",
+      "description": "States that `DPLocalScheduler.__init__` forwards `scheduling_policy` to the base scheduler.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_22",
+      "description": "States that the repo-wide 100644 => 100755 git mode changes predate this work.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_23",
+      "description": "States that `_insert_waiting_by_precedence` uses `bisect` to insert waiting requests.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "negative"
+      }
+    },
+    {
+      "criteria_id": "criteria_25",
+      "description": "States that MockLocalScheduler in test_dp_scheduler.py accepts the scheduling_policy argument.",
+      "metadata": {
+        "category": "Decision rationale",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_26",
+      "description": "Explains that Mock(spec=Request) needs request.metrics.arrival_time set explicitly because an unset Mock arrival_time cannot be ordered.",
+      "metadata": {
+        "category": "Decision rationale",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_28",
+      "description": "States that test_from_generic_request is planned as part of the Request priority tests.",
+      "metadata": {
+        "category": "Decision rationale",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_29",
+      "description": "Penalizes a claim that the new ResourceManagerV1 tests construct the manager through `__init__` rather than using `__new__`.",
+      "metadata": {
+        "category": "Decision rationale",
+        "weight": "negative"
+      }
+    },
+    {
+      "criteria_id": "criteria_30",
+      "description": "Records that the implementation edits are present in the current worktree.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_31",
+      "description": "States that EngineClient priority validation tests were not yet written at the g18 point.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_32",
+      "description": "Specifies the next step of adding priority validation tests to `TestEngineClientValidParameters` in `/app/tests/entrypoints/test_engine_client.py`.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_33",
+      "description": "States that priority 5 raises ParameterError under the default EngineClient test setup.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_34",
+      "description": "Specifies the next step of adding a mocked-config `ResourceManagerV1` test class to `/app/tests/engine/test_resource_manager_v1.py`.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_35",
+      "description": "Specifies that the planned ResourceManagerV1 tests cover policy-flip reordering through get_waiting_request_ids().",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_37",
+      "description": "Records that the combined baseline run across test_local_scheduler.py, test_scheduler_config.py, and test_request.py passed.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_39",
+      "description": "Records that the local-scheduler suite passed after priority tests were added.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_40",
+      "description": "States that read truncates long results.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_41",
+      "description": "States that `/app/tests/entrypoints/test_engine_client.py` already has a passing baseline run.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "negative"
+      }
+    },
+    {
+      "criteria_id": "criteria_42",
+      "description": "Organizes related facts so that completed work, work in progress, and next steps are each distinguishable from one another.",
+      "metadata": {
+        "category": "Structural clarity",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_43",
+      "description": "Contains at most 8300 characters.",
+      "metadata": {
+        "category": "Compression efficiency",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_44",
+      "description": "States that existing tests under `/app/tests/scheduler/` must pass before task completion.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_45",
+      "description": "States that new ResourceManagerV1 tests allocate instances with ResourceManagerV1.__new__(ResourceManagerV1).",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_46",
+      "description": "States that the ResourceManagerV1 test fixture bypasses ResourceManagerV1.__init__.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_49",
+      "description": "States that scheduling policy is exposed through the --scheduling-policy CLI flag.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_50",
+      "description": "Specifies that EngineClient validation tests import ParameterError from fastdeploy.utils.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_52",
+      "description": "States that file permissions must not be changed.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_53",
+      "description": "States that git config must not be changed.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_57",
+      "description": "States that ResourceManagerV1 priority-ordering tests were not yet written at the g18 point.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_58",
+      "description": "States that priority 0 passes EngineClient validation.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_59",
+      "description": "States that the priority policy accepts priority 5.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_60",
+      "description": "States that the priority policy accepts priority -3.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_61",
+      "description": "States that an EngineClient.__new__(EngineClient) fcfs fallback raises ParameterError for the priority request.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_62",
+      "description": "States that switching back to fcfs restores arrival order in ResourceManagerV1.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_63",
+      "description": "Specifies that the planned ResourceManagerV1 tests cover precedence re-entry in reschedule_preempt_task.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_64",
+      "description": "Specifies planned unit coverage for _waiting_precedence_key in the ResourceManagerV1 tests.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_65",
+      "description": "Specifies planned unit coverage for `_ordered_waiting_requests` in the ResourceManagerV1 tests.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_66",
+      "description": "States that _reclaim_blocks_for_waiting_request returns False under fcfs.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_67",
+      "description": "States that _reclaim_blocks_for_waiting_request returns True when needed_blocks is less than or equal to 0.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_68",
+      "description": "Records that the scheduler-config suite passed after scheduling-policy tests were added.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_69",
+      "description": "Records that the DPLocalScheduler test run passed after the MockLocalScheduler fix.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_71",
+      "description": "States that new ResourceManagerV1 tests must not call create_engine_config.",
+      "metadata": {
+        "category": "Decision rationale",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_72",
+      "description": "States that test paths calling add_request stub apply_async_preprocess.",
+      "metadata": {
+        "category": "Decision rationale",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_73",
+      "description": "States the objective of implementing LocalScheduler queue ordering in FastDeploy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_74",
+      "description": "States the objective of implementing DPLocalScheduler queue ordering in FastDeploy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_75",
+      "description": "States that ResourceManagerV1 coverage must test waiting-request order.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_76",
+      "description": "States the objective of implementing EngineClient.valid_parameters validation in FastDeploy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_77",
+      "description": "States the objective of exposing the EngineArgs --scheduling-policy flag in FastDeploy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_78",
+      "description": "States that LocalScheduler put_requests appends request ids under fcfs.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_81",
+      "description": "Identifies `/app/fastdeploy/scheduler/dp_scheduler.py` as a relevant source file.",
+      "metadata": {
+        "category": "Artifact preservation",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_85",
+      "description": "Specifies fixing failures until the scheduler test suite passes.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_86",
+      "description": "Specifies fixing failures until the engine test suite passes.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_87",
+      "description": "Identifies running all scheduler, engine, and entrypoints tests with `cd /app && python -m pytest tests/scheduler tests/engine tests/entrypoints -q` as the next step.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_88",
+      "description": "States that ResourceManagerV1 coverage must test admission reclaim.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_89",
+      "description": "States that ResourceManagerV1 coverage must test preemption.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "minor"
+      }
+    },
+    {
+      "criteria_id": "criteria_90",
+      "description": "Specifies fixing failures until the entrypoints test suite passes.",
+      "metadata": {
+        "category": "Temporal coherence",
+        "weight": "major"
+      }
+    },
+    {
+      "criteria_id": "criteria_91",
+      "description": "States that `priority` is an alternative scheduling policy.",
+      "metadata": {
+        "category": "Goal fidelity",
+        "weight": "minor"
+      }
+    }
+  ]
+}

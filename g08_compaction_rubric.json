@@ -1,0 +1,439 @@
+{
+  "criteria": [
+    {
+      "criteria_id": "criteria_0",
+      "description": "States that plugins declared directly by an active config file must resolve relative to that config file's directory rather than the project root.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_1",
+      "description": "States that plugins declared by a config loaded through `extends` must resolve relative to the extending config file's directory rather than the shareable config package's own location.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_2",
+      "description": "States that ESLint must throw a conflict error when configs active for one target file load a plugin from different physical locations.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_3",
+      "description": "States that the conflict error must name both config sources.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_4",
+      "description": "States that no conflict error is thrown when every active config for a target file resolves a plugin to one physical file.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_5",
+      "description": "States that config files applying to separate, non-overlapping target files must not conflict merely because each loads its own physical copy of a plugin.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_6",
+      "description": "States that each file matched by config files that apply to separate, non-overlapping target files must still produce a lint result.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_7",
+      "description": "States that users must be able to set one shared plugin-resolution directory.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_8",
+      "description": "States that setting the shared plugin-resolution directory makes all plugins load from that directory.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_9",
+      "description": "States that conflicts caused only by separate local installations are suppressed when the shared plugin-resolution directory is set.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_10",
+      "description": "States that changing the plugin installation used for a target must not change which configuration results apply to that target.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_11",
+      "description": "States that a missing plugin error with no override set must report the directory of the config file whose plugin lookup failed rather than the process working directory.",
+      "metadata": { "category": "Goal fidelity", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_12",
+      "description": "States that users should receive the plugin intended by each configuration, including inherited configurations, rather than an unrelated project-level copy.",
+      "metadata": { "category": "Goal fidelity", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_13",
+      "description": "Specifies `createContext({ cwd }, providedType, providedName, providedFilePath, providedMatchBasePath)` as the required signature in `lib/cli-engine/config-array-factory.js`.",
+      "metadata": { "category": "Artifact preservation", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_14",
+      "description": "States that the first `createContext` argument must be an object holding `cwd` rather than a plain directory string.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_15",
+      "description": "States that switching `createContext` to accept `{ cwd }` preserves its `filePath` result when `providedType`, `providedName`, `providedFilePath`, and `providedMatchBasePath` are identical.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_16",
+      "description": "States that `createContext` must keep its current `matchBasePath` result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_17",
+      "description": "States that `createContext` must keep its current `name` result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_18",
+      "description": "States that `createContext` must keep its current `type` result for identical providedType, providedName, providedFilePath, and providedMatchBasePath.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_19",
+      "description": "Specifies `resolvePluginsRelativeTo` as the `CLIEngine` option for the shared directory override in `lib/cli-engine/cli-engine.js`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_20",
+      "description": "States that `executeOnFiles()` must throw when one target gets conflicting physical copies of a plugin.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_21",
+      "description": "Specifies the conflict message as `Plugin \"<pluginId>\" was conflicted between \"<importerName1>\" and \"<importerName2>\".`.",
+      "metadata": { "category": "Artifact preservation", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_22",
+      "description": "Specifies `\"plugin-conflict\"` as the required `messageTemplate` value.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_23",
+      "description": "Specifies that `messageData.pluginId` must hold the plugin identifier string.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_24",
+      "description": "Specifies `messageData.plugins` as `Array<{ filePath: string, importerName: string }>`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_25",
+      "description": "States that `messageData.plugins` holds the two conflicting records in message order.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_26",
+      "description": "States that conflict sources are listed from higher to lower configuration precedence.",
+      "metadata": { "category": "Artifact preservation", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_27",
+      "description": "Specifies a regular config file's relative path as its `importerName`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_28",
+      "description": "Specifies `\"--config\"` as the `importerName` of a file given through `configFile`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_29",
+      "description": "Specifies `\"CLIOptions\"` as the `importerName` of plugins given through the `plugins` option.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_30",
+      "description": "States that `CascadingConfigArrayFactory` in `lib/cli-engine/cascading-config-array-factory.js` must accept `resolvePluginsRelativeTo`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_31",
+      "description": "Records `const relativeToDirectory = resolvePluginsRelativeTo || ctx.matchBasePath;` as the plugin resolution base in `_loadPlugin`.",
+      "metadata": { "category": "Artifact preservation", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_32",
+      "description": "States that the `additionalPluginPool` branch passes `filePath: void 0`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_33",
+      "description": "States that the `resolvePluginsRelativeTo = cwd` default was removed from the `CascadingConfigArrayFactory` constructor.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_34",
+      "description": "States that `getConfigArrayForFile` calls `checkPluginConflicts(finalConfigArray, absoluteFilePath)` before returning.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_35",
+      "description": "States that `messages/plugin-conflict.txt` has been written.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_36",
+      "description": "Records that the agent created an empty fixture at tests/fixtures/config-hierarchy/broken/plugins/node_modules/eslint-plugin-example.js.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_37",
+      "description": "States that every scenario in the final run of `/workspace/repo/.scratch/check-plugin-conflicts.js` passed.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_38",
+      "description": "States that a plugin resolution describe block was added to `tests/lib/cli-engine/cascading-config-array-factory.js`.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_39",
+      "description": "States that the tests in `tests/lib/cli-engine/cascading-config-array-factory.js` passed.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_40",
+      "description": "States that a plugin resolution describe block was added to `tests/lib/cli-engine/cli-engine.js`.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_41",
+      "description": "States that the tests in `tests/lib/cli-engine/cli-engine.js` passed.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_42",
+      "description": "States that the only failures in the recursive `tests/lib/cli-engine` run are `formatter:codeframe` failures.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_43",
+      "description": "States that the tests in `tests/lib/linter` passed.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_44",
+      "description": "Records that the test `should return an error when rule isn't found` in `tests/lib/cli.js` still fails.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_45",
+      "description": "Records that after the agent stashed its plugin-resolution implementation changes, the `should return an error when rule isn't found` failure in `tests/lib/cli.js` matched the baseline.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_46",
+      "description": "States that `/workspace/repo/.scratch` has been deleted.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_47",
+      "description": "Records that `messages/plugin-conflict.txt` is untracked.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_48",
+      "description": "States that the plugin resolution base is `ctx.matchBasePath` when no override is set.",
+      "metadata": { "category": "Decision rationale", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_49",
+      "description": "Explains that the agent chose `ctx.matchBasePath` as the plugin resolution base because it survives the `{ ...ctx, filePath, name }` spread.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_50",
+      "description": "Explains that the agent rejected `ctx.filePath` as the plugin resolution base because a decoy plugin copy inside a shareable config package would then win.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_51",
+      "description": "Explains that the agent rejected a new field on the object `createContext` returns because the required `createContext` parameters name no such field.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_52",
+      "description": "States that the agent concluded `createCLIConfigArray` loads the `--config` file with `{ name: \"--config\", basePath: cwd }`, so its plugins resolve from `cwd`.",
+      "metadata": { "category": "Decision rationale", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_53",
+      "description": "States that the agent noted a `--config` file outside the project with its own plugin copy does not get that copy under `cwd` resolution.",
+      "metadata": { "category": "Decision rationale", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_54",
+      "description": "States that the agent noted the loss of a `--config` file's own plugin copy under `cwd` resolution sits against the requirement that users receive the plugin intended by each configuration.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_55",
+      "description": "Explains that the agent kept `ctx.matchBasePath` as the resolution base for `--config` files because conflict detection still works for subdirectory configs.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_56",
+      "description": "States that the scenarios in `/workspace/repo/.scratch/check-plugin-conflicts.js` were the only check that `--config` plugins resolve from `cwd`.",
+      "metadata": { "category": "Decision rationale", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_57",
+      "description": "States that the agent concluded CLI option plugins resolve from `cwd` because the `CLIOptions` element has no `filePath`.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_58",
+      "description": "States that the agent concluded `extends` resolution still uses `ctx.filePath`.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_59",
+      "description": "States that `CLIOptions` has the highest precedence in the final config array.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_60",
+      "description": "States that the `--config` element comes next after `CLIOptions` in the final config array.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_61",
+      "description": "States that `checkPluginConflicts` walks elements from the last to the first, highest precedence first.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_62",
+      "description": "Records `!element.criteria || element.criteria.test(filePath)` as the element filter for `checkPluginConflicts`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_63",
+      "description": "States that `checkPluginConflicts` skips plugin records with no `filePath`, covering pool plugins and failed loads.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_64",
+      "description": "Records that `checkPluginConflicts` keeps the first record per plugin id in `foundPlugins`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_65",
+      "description": "States that in `checkPluginConflicts`, a later record for the same plugin id with a different `filePath` throws with `messageTemplate: \"plugin-conflict\"`.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_66",
+      "description": "States that the agent concluded the `--config` record-order failure of `/workspace/repo/.scratch/check-plugin-conflicts.js` was a bug in the script because its `collect()` reads elements in array order.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_67",
+      "description": "States that the agent concluded the `plugin declarations in non-matching overrides don't conflict` scenario failed in the scratch script because `collect()` ignored the config-element `criteria` filter.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_68",
+      "description": "States that a plugin declared only in a `**/*.txt` override does not conflict for `a/one.js`.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_69",
+      "description": "States that the agent concluded the `formatter:codeframe` failures come from a code-frame dependency issue.",
+      "metadata": { "category": "Decision rationale", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_70",
+      "description": "States that finishing the review of the `git diff` of the changed `lib/` files is a remaining step.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_71",
+      "description": "States that deciding if `lib/options.js` needs a change for `--resolve-plugins-relative-to` is a remaining step.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_72",
+      "description": "States that deciding if `lib/cli.js` needs a change for `--resolve-plugins-relative-to` is a remaining step.",
+      "metadata": { "category": "Temporal coherence", "weight": "major" }
+    },
+    {
+      "criteria_id": "criteria_73",
+      "description": "Records that the agent noted the task constraints name only `CLIEngine` as needing to accept `resolvePluginsRelativeTo`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_74",
+      "description": "States that the only change in `lib/cli-engine/cli-engine.js` is the `resolvePluginsRelativeTo` JSDoc update.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_75",
+      "description": "States that the `createContext` test calls in `tests/lib/cli-engine/config-array-factory.js` now pass `{ cwd: tempDir }`.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_76",
+      "description": "States that the project-root plugin test in `tests/lib/cli-engine/config-array-factory.js` now expects `subdir/node_modules/eslint-plugin-subdir/index.js`.",
+      "metadata": { "category": "Temporal coherence", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_77",
+      "description": "States that the `ConfigArrayFactory` constructor stores `path.resolve(cwd, resolvePluginsRelativeTo)` when the override is given and `void 0` otherwise.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_78",
+      "description": "States that the plugin-missing `messageData` reports `resolvePluginsRelativeTo: relativeToDirectory`.",
+      "metadata": { "category": "Artifact preservation", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_79",
+      "description": "Contains at most 11100 characters.",
+      "metadata": { "category": "Compression efficiency", "weight": "minor" }
+    },
+    {
+      "criteria_id": "criteria_80",
+      "description": "States that `/workspace/repo/.scratch` still exists.",
+      "metadata": { "category": "Temporal coherence", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_81",
+      "description": "States that `tests/lib/cli-engine/config-array-factory.js` remains unmodified.",
+      "metadata": { "category": "Temporal coherence", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_82",
+      "description": "States that the agent switched `--config` plugins to resolve from the directory of the `--config` file itself.",
+      "metadata": { "category": "Decision rationale", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_83",
+      "description": "States that the `formatter:codeframe` failures were caused by the agent's changes.",
+      "metadata": { "category": "Decision rationale", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_84",
+      "description": "States that `lib/options.js` has already been changed.",
+      "metadata": { "category": "Temporal coherence", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_85",
+      "description": "States that `/workspace/repo/.scratch/check-plugin-conflicts.js` still has failing scenarios.",
+      "metadata": { "category": "Temporal coherence", "weight": "negative" }
+    },
+    {
+      "criteria_id": "criteria_86",
+      "description": "Separates finished work from outstanding work.",
+      "metadata": { "category": "Structural clarity", "weight": "minor" }
+    }
+  ]
+}
