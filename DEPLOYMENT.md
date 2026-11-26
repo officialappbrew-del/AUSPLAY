@@ -50,11 +50,15 @@ local `.env` file.
    Generate a local secret if needed with
    `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Add the output only
    to Render's environment settings.
-4. Deploy the service and copy its public HTTPS URL, for example
-   `https://ausplay-api.onrender.com`.
-5. Check `https://<your-render-service>.onrender.com/docs` to confirm the API is
-   responding. Do not use the Render dashboard's external database URL if the private
-   internal URL is available.
+4. Deploy the service and use its public HTTPS URL:
+   `https://ausplay.onrender.com`.
+5. Open `https://ausplay.onrender.com/` for the API status response and
+   `https://ausplay.onrender.com/docs` for the interactive API documentation. Do not
+   use the Render dashboard's external database URL if the private internal URL is
+   available.
+
+The Render URL hosts the FastAPI backend, not the React website. The frontend is served
+separately by Vercel and uses this backend URL for API and WebSocket requests.
 
 The backend applies Alembic migrations before starting. For a multi-instance service,
 run `alembic upgrade head` once as a pre-deploy/release command rather than from every
@@ -201,7 +205,7 @@ Run `alembic upgrade head` on a new, empty destination; do not use `stamp` there
 
    | Key | Value |
    | --- | --- |
-   | `VITE_API_URL` | The Render backend URL, e.g. `https://ausplay-api.onrender.com` |
+   | `VITE_API_URL` | `https://ausplay.onrender.com` |
 
    Use the URL origin only: do not add `/docs`, an API path, or a trailing slash.
    `VITE_API_URL` is used at build time, so redeploy after changing it.
@@ -210,6 +214,9 @@ Run `alembic upgrade head` on a new, empty destination; do not use `stamp` there
 
 The frontend derives its WebSocket URL from `VITE_API_URL`, using secure WebSockets
 (`wss://`) when the backend URL uses HTTPS. No separate WebSocket URL is needed.
+If `VITE_API_URL` is not set for a production build, the frontend defaults to
+`https://ausplay.onrender.com`. Local development continues to default to
+`http://localhost:8000`.
 
 ## 5. Allow the Vercel site through backend CORS
 

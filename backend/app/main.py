@@ -48,6 +48,15 @@ app.add_middleware(
 bearer = HTTPBearer(auto_error=False)
 
 
+@app.get("/")
+def api_root():
+    return {
+        "service": "AusPlay API",
+        "status": "ok",
+        "docs": "/docs",
+    }
+
+
 class Credentials(BaseModel):
     username: str
     password: str
