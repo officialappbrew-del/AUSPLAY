@@ -236,8 +236,9 @@ RULEBOOK_DEFAULTS = {
     "ludo": {
         "title": "AusPlay Ludo",
         "content": (
-            "Roll six to leave base and earn another roll. Safe squares prevent captures; "
-            "finish with an exact roll. Captures do not grant an extra turn."
+            "Roll a six to leave base and earn another roll. Safe squares prevent captures; "
+            "finish with an exact roll. Captures do not grant an extra turn, and there is no "
+            "three-sixes penalty."
         ),
     },
     "polo": {
@@ -259,8 +260,10 @@ RULEBOOK_DEFAULTS = {
     "whot": {
         "title": "AusPlay Whot",
         "content": (
-            "Match suit or number. Action cards hold, suspend, or draw; WHOT 20 chooses "
-            "the next suit. Penalty cards do not stack."
+            "Play a card that matches the current suit or number, or draw. A 1 holds the next "
+            "player, 2 draws two, 5 draws three, 8 skips, 14 starts a general market, and WHOT "
+            "20 chooses the next suit. Penalty cards do not stack; the first player to empty "
+            "their hand wins."
         ),
     },
 }

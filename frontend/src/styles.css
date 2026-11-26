@@ -2,6 +2,7 @@
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .page { max-width:1120px; margin:0 auto; padding:0 32px; }
 .gamepad-help { position:fixed; z-index:20; left:50%; bottom:16px; max-width:calc(100vw - 24px); transform:translateX(-50%); padding:10px 16px; border:1px solid #ffffff3d; border-radius:999px; background:#17222E; color:var(--text); box-shadow:0 4px 18px #0008; font-size:14px; text-align:center; }
 nav { display:flex; justify-content:space-between; align-items:center; padding:32px 0; }
@@ -49,8 +50,7 @@ section { padding-bottom:96px; }
 .selected-game-options p { margin:0; color:var(--muted); }
 .selected-game-options .eyebrow { margin-bottom:6px; color:var(--accent); }
 .selected-game-buttons { display:flex; flex-wrap:wrap; gap:10px; }
-.solo-level-controls { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-bottom:24px; }
-.solo-level-controls > span { color:var(--muted); }
+.solo-level-controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
 .rooms-section { border-top:1px solid #2A3949; padding-top:72px; }
 .room-actions { display:flex; align-items:center; gap:16px; }
 .room-form { display:grid; grid-template-columns:2fr 1.2fr 1fr auto; align-items:end; gap:16px; margin-bottom:32px; }
@@ -126,11 +126,18 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .dispute-snapshot pre { max-height:320px; overflow:auto; padding:14px; border-radius:8px; background:var(--bg); color:#98e3b2; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
 .game-section { border-top:1px solid #2A3949; padding-top:72px; }
 .game-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
-.game-toolbar h2 { margin:0; }
+.game-toolbar h2 { margin:0; font-size:clamp(18px,2.4vw,28px); line-height:1.15; overflow-wrap:anywhere; }
+.game-toolbar .room-actions { display:flex; gap:8px; }
+.game-icon-button { display:grid; place-items:center; width:44px; height:44px; padding:0; border:1px solid #2A3949; border-radius:10px; background:var(--surface); color:var(--text); cursor:pointer; }
+.game-icon-button:hover { border-color:var(--accent); color:var(--accent); }
+.game-icon-button:disabled { cursor:not-allowed; opacity:.5; }
+.game-icon-button svg { width:21px; height:21px; }
 .chat-close:focus-visible,.chat-bell:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .game-layout { display:grid; grid-template-columns:minmax(280px,520px) minmax(220px,1fr); gap:32px; align-items:start; }
-.solo-draughts-layout { display:grid; grid-template-columns:minmax(280px,520px) minmax(220px,1fr); gap:32px; align-items:start; }
+.solo-draughts-layout { display:grid; grid-template-columns:minmax(280px,520px); justify-content:center; align-items:start; }
 .board-with-players { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.solo-draughts-level { display:flex; align-items:center; gap:10px; color:var(--muted); font-weight:600; }
+.solo-draughts-level select { min-width:76px; }
 .board-player-label { display:flex; justify-content:space-between; align-items:center; gap:12px; min-height:40px; padding:8px 12px; border:1px solid #2A3949; border-radius:8px; background:var(--surface); }
 .board-player-label strong { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .board-player-label span { flex:0 0 auto; color:var(--muted); font-size:12px; text-transform:uppercase; }
@@ -159,7 +166,6 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .golf-controls form { display:grid; gap:16px; }
 .golf-controls .practice-note { color:#98e3b2; font-size:14px; }
 .solo-game-section { scroll-margin-top:16px; }
-.solo-level-picker small { color:var(--muted); line-height:1.4; }
 .draughts-board { display:grid; grid-template-columns:repeat(8,1fr); width:100%; aspect-ratio:1; border:6px solid #263747; border-radius:8px; overflow:hidden; }
 .chess-board { display:grid; grid-template-columns:repeat(8,1fr); width:100%; aspect-ratio:1; border:6px solid #263747; border-radius:8px; overflow:hidden; }
 .chess-piece { font-size:clamp(22px,6vw,56px); line-height:1; text-shadow:0 1px 3px #0008; }
@@ -206,6 +212,12 @@ textarea { width:100%; min-height:96px; resize:vertical; border-radius:8px; bord
 .confirm-dialog-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:12px; margin-top:24px; }
 .confirm-dialog-actions .link { min-width:90px; }
 .confirm-dialog-actions .btn { min-width:130px; }
+.game-help-dialog { width:min(440px,calc(100vw - 32px)); max-width:none; max-height:calc(100dvh - 32px); overflow:auto; border:1px solid #526779; border-radius:16px; padding:24px; background:var(--surface); color:var(--text); box-shadow:0 18px 56px #000b; }
+.game-help-dialog::backdrop { background:#070b10cc; backdrop-filter:blur(3px); }
+.game-help-dialog h2 { margin:0 0 12px; font-size:24px; }
+.game-help-content { margin:0; color:var(--muted); line-height:1.55; white-space:pre-wrap; }
+.game-help-actions { display:flex; justify-content:flex-end; margin-top:24px; }
+.fairness-info > summary { cursor:pointer; color:var(--accent); }
 .ludo-layout { display:grid; grid-template-columns:minmax(220px,320px) minmax(0,1fr); gap:24px; align-items:start; }
 .ludo-controls { display:flex; flex-direction:column; gap:18px; }
 .ludo-controls p { line-height:1.5; }

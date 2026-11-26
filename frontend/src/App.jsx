@@ -1153,17 +1153,9 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
               : `Waiting for ${players[currentPlayer.color]} (${currentPlayer.color}).`}
         </p>
         {resultMessage && <p className="ludo-result">{resultMessage}</p>}
-        <p className="practice-note">
-          A six lets a token leave base and grants another roll. Exact rolls are required to finish;
-          captures do not grant an extra turn, and there is no three-sixes penalty.
-        </p>
-        <p className="practice-note">
-          {game.solo
-            ? "The computer's dice are generated on the server for solo practice."
-            : "Rolls are committed before play. The server seed is revealed when the match ends."}
-        </p>
-        {game.fairness?.available ? (
-          <div className="fairness-info">
+        {game.fairness?.available && (
+          <details className="fairness-info">
+            <summary>Roll fairness</summary>
             <p>Server-seed commitment (SHA-256)</p>
             <code>{game.fairness.server_seed_hash}</code>
             {game.fairness.server_seed ? (
@@ -1183,16 +1175,10 @@ function LudoBoard({ game, onRoll, onMove, actionPending }) {
                 </details>
                 {fairnessStatus && <p role="status">{fairnessStatus}</p>}
               </>
-            ) : game.solo ? (
-              <p className="practice-note">Solo practice does not use a multiplayer roll proof.</p>
-            ) : (
+            ) : game.solo ? null : (
               <p>Seed reveal is available after the match is finished.</p>
             )}
-          </div>
-        ) : (
-          <p className="practice-note">
-            This match started before verifiable dice were enabled.
-          </p>
+          </details>
         )}
       </div>
       <div className="ludo-players">
@@ -1298,6 +1284,86 @@ function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }) {
   );
 }
 
+function GameActionIcon({ action }) {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {action === "help" ? (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.7 9a2.4 2.4 0 1 1 4.1 1.7c-1 .9-1.8 1.2-1.8 2.8" />
+          <path d="M12 17h.01" />
+        </>
+      ) : action === "quit" ? (
+        <>
+          <path d="M10 17l5-5-5-5M15 12H3" />
+          <path d="M13 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5" />
+        </>
+      ) : (
+        <>
+          <path d="M20 11a8 8 0 1 1-2.34-5.66" />
+          <path d="M20 4v5h-5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function GameHelpButton({ gameId, gameName, rulebook }) {
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef(null);
+  const titleId = `game-help-title-${gameId}`;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    else if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  return (
+    <>
+      <ActionButton
+        className="game-icon-button"
+        type="button"
+        aria-label={`How to play ${gameName}`}
+        title="How to play"
+        onClick={() => setOpen(true)}
+      >
+        <GameActionIcon action="help" />
+      </ActionButton>
+      <dialog
+        className="game-help-dialog"
+        ref={dialogRef}
+        aria-labelledby={titleId}
+        onCancel={(event) => {
+          event.preventDefault();
+          setOpen(false);
+        }}
+        onClose={() => setOpen(false)}
+      >
+        <h2 id={titleId}>{rulebook?.title || `${gameName} rules`}</h2>
+        <p className="game-help-content">
+          {rulebook?.content || "Game instructions are unavailable right now."}
+        </p>
+        <div className="game-help-actions">
+          <ActionButton className="btn" type="button" onClick={() => setOpen(false)}>
+            Close
+          </ActionButton>
+        </div>
+      </dialog>
+    </>
+  );
+}
+
 function BoardPlayerLabel({ name, username = name, side, isTurn, gameActive = true }) {
   return (
     <div className="board-player-label">
@@ -1375,9 +1441,7 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
         />
       </div>
       <div className="game-info card">
-        <p>You are <strong>{players[viewer.side]}</strong> ({viewer.side}).</p>
         <p aria-live="polite">{result}</p>
-        <p>White: {players.white} · Black: {players.black}</p>
         {state.moves.length > 0 && (
           <details className="chess-history">
             <summary>Move history ({state.moves.length})</summary>
@@ -1391,7 +1455,6 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
             </ol>
           </details>
         )}
-        <p className="practice-note">Standard chess rules. Free practice only; no stakes or prizes.</p>
       </div>
     </div>
   );
@@ -1421,7 +1484,6 @@ function GolfScorecard({ game, onSubmitScore, actionPending }) {
   return (
     <div className="golf-layout">
       <div className="card golf-scorecard-wrap">
-        <p className="eyebrow">NINE-HOLE STROKE PLAY</p>
         <h3>Scorecard</h3>
         <div className="golf-scorecard-scroll">
           <table className="golf-scorecard">
@@ -1500,10 +1562,6 @@ function GolfScorecard({ game, onSubmitScore, actionPending }) {
             </ActionButton>
           </form>
         )}
-        <p className="practice-note">
-          Enter your completed hole score in turn. Scores are self-reported for friendly practice;
-          this is a scorecard simulation, not shot-by-shot golf.
-        </p>
       </div>
     </div>
   );
@@ -1513,7 +1571,6 @@ function PoloScorecard({ game, onSubmitScore, actionPending }) {
   const { state, players, viewer } = game;
   const [goals, setGoals] = useState(0);
   const teamOnTurn = state.teams.find((team) => team.user_id === state.turn_user_id);
-  const currentTeam = state.teams.find((team) => team.user_id === viewer.user_id);
   const winners = state.winner_user_ids.map((userId) => players[userId]);
 
   useEffect(() => {
@@ -1531,7 +1588,6 @@ function PoloScorecard({ game, onSubmitScore, actionPending }) {
   return (
     <div className="golf-layout">
       <div className="card golf-scorecard-wrap">
-        <p className="eyebrow">FOUR-CHUKKA MATCH</p>
         <h3>Polo scorecard</h3>
         <div className="golf-scorecard-scroll">
           <table className="golf-scorecard">
@@ -1605,11 +1661,6 @@ function PoloScorecard({ game, onSubmitScore, actionPending }) {
             </ActionButton>
           </form>
         )}
-        <p className="practice-note">
-          Each player represents one team and enters goals for their team in turn. Scores are
-          self-reported for friendly practice; this is a scorecard simulation.
-          {currentTeam ? ` You represent Team ${state.teams.indexOf(currentTeam) === 0 ? "A" : "B"}.` : ""}
-        </p>
       </div>
     </div>
   );
@@ -1644,7 +1695,6 @@ function SnookerScorecard({ game, onSubmitScore, actionPending }) {
   return (
     <div className="golf-layout">
       <div className="card golf-scorecard-wrap">
-        <p className="eyebrow">BEST OF THREE FRAMES</p>
         <h3>Snooker scorecard</h3>
         <div className="golf-scorecard-scroll">
           <table className="golf-scorecard">
@@ -1716,10 +1766,6 @@ function SnookerScorecard({ game, onSubmitScore, actionPending }) {
             </ActionButton>
           </form>
         )}
-        <p className="practice-note">
-          Players enter their own frame points in turn. The higher score takes the frame; a tied
-          frame is not awarded. Scores are self-reported for friendly practice, not referee-verified.
-        </p>
       </div>
     </div>
   );
@@ -1855,10 +1901,6 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
             {actionPending ? "Drawing..." : "Draw one card"}
           </ActionButton>
         )}
-        <p className="practice-note">
-          Match suit or number. A 1 holds, 2 draws two, 5 draws three, 8 skips, 14 starts a
-          general market, and WHOT 20 chooses a suit. Penalty cards do not stack.
-        </p>
       </div>
       <div className="whot-players">
         {state.players.map((player) => (
@@ -1898,7 +1940,7 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
   );
 }
 
-function SoloDraughts({ token, username, displayName, onClose }) {
+function SoloDraughts({ token, username, displayName, rulebook, onClose }) {
   const [game, setGame] = useState(createSoloDraughtsGame);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [thinking, setThinking] = useState(false);
@@ -2086,22 +2128,73 @@ function SoloDraughts({ token, username, displayName, onClose }) {
     >
       <div className="game-toolbar">
         <div>
-          <p className="eyebrow">SOLO PRACTICE · LEVEL {gameLevel}</p>
-          <h2>Draughts vs computer</h2>
+          <h2>{username} vs Computer</h2>
         </div>
         <div className="room-actions">
           <ActionButton
-            className="link"
+            className="game-icon-button"
+            aria-label="Start a new game"
+            title="New game"
             onClick={() => setConfirmation("new-game")}
             disabled={progressSaving}
           >
-            New game
+            <GameActionIcon action="new-game" />
           </ActionButton>
-          <ActionButton className="link" onClick={() => setConfirmation("quit")}>Quit game</ActionButton>
+          <ActionButton
+            className="game-icon-button"
+            aria-label="Quit game"
+            title="Quit game"
+            onClick={() => setConfirmation("quit")}
+          >
+            <GameActionIcon action="quit" />
+          </ActionButton>
+          <GameHelpButton gameId="draughts" gameName="Draughts" rulebook={rulebook} />
         </div>
       </div>
       <div className="solo-draughts-layout">
         <div className="board-with-players">
+          {progressLoaded && (
+            <label className="solo-level-picker solo-draughts-level">
+              <span>Level</span>
+              <select
+                aria-label="Select Draughts level"
+                value={level}
+                onChange={chooseLevel}
+                disabled={progressSaving}
+              >
+                {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
+                  <option key={unlocked} value={unlocked}>{unlocked}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="sr-only" role="status" aria-live="polite">
+            {statusMessage}
+            {progressSaving ? " Saving your level progress." : ""}
+            {progressMessage ? ` ${progressMessage}` : ""}
+          </p>
+          {loadError && (
+            <div>
+              <p className="error" role="alert">Could not load your levels: {loadError}</p>
+              <ActionButton className="link" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+                Retry
+              </ActionButton>
+            </div>
+          )}
+          {saveError && (
+            <div>
+              <p className="error" role="alert">Could not save your level progress: {saveError}</p>
+              <ActionButton
+                className="link"
+                onClick={() => {
+                  recordedRound.current = null;
+                  setSaveAttempt((attempt) => attempt + 1);
+                }}
+              >
+                Retry saving
+              </ActionButton>
+            </div>
+          )}
           <BoardPlayerLabel
             name="Computer"
             side="Black"
@@ -2152,49 +2245,6 @@ function SoloDraughts({ token, username, displayName, onClose }) {
             gameActive={game.status === "active"}
           />
         </div>
-        <div className="game-info card" aria-live="polite">
-          <p><strong>{statusMessage}</strong></p>
-          {progressLoaded && (
-            <label className="solo-level-picker">
-              Level — {highestLevel} of 100 unlocked
-              <select value={level} onChange={chooseLevel} disabled={progressSaving}>
-                {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
-                  <option key={unlocked} value={unlocked}>Level {unlocked}</option>
-                ))}
-              </select>
-              <small>Win a level to unlock the next. Changing level starts a new game.</small>
-            </label>
-          )}
-          <p>You play as red. The system plays as black.</p>
-          <p>Captures are mandatory. Continue a multi-jump with the same piece.</p>
-          {progressSaving && <p className="practice-note">Saving your level progress...</p>}
-          {progressMessage && <p className="practice-note">{progressMessage}</p>}
-          {loadError && (
-            <div>
-              <p className="error" role="alert">Could not load your levels: {loadError}</p>
-              <ActionButton className="link" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
-                Retry
-              </ActionButton>
-            </div>
-          )}
-          {saveError && (
-            <div>
-              <p className="error" role="alert">
-                Could not save your level progress: {saveError}
-              </p>
-              <ActionButton
-                className="link"
-                onClick={() => {
-                  recordedRound.current = null;
-                  setSaveAttempt((attempt) => attempt + 1);
-                }}
-              >
-                Retry saving
-              </ActionButton>
-            </div>
-          )}
-          <p className="practice-note">Free practice against the computer. An account is required; there are no stakes.</p>
-        </div>
       </div>
       {confirmation && (
         <ConfirmDialog
@@ -2235,7 +2285,7 @@ function SoloDraughts({ token, username, displayName, onClose }) {
   );
 }
 
-function SoloGame({ token, gameId, onClose }) {
+function SoloGame({ token, gameId, username, rulebook, onClose }) {
   const [game, setGame] = useState(null);
   const [level, setLevel] = useState(1);
   const [highestLevel, setHighestLevel] = useState(1);
@@ -2343,11 +2393,6 @@ function SoloGame({ token, gameId, onClose }) {
     actionPending: pending,
     onSubmitScore: (value) => void submitAction({ action: "score", value }),
   };
-  const levelWon = Boolean(game && (
-    game.state.winner_user_id === game.viewer.user_id
-    || game.state.winner_user_ids?.includes(game.viewer.user_id)
-  ));
-
   return (
     <section
       className="game-section solo-game-section"
@@ -2356,71 +2401,73 @@ function SoloGame({ token, gameId, onClose }) {
     >
       <div className="game-toolbar">
         <div>
-          <p className="eyebrow">SOLO PRACTICE · LEVEL {game?.level || level}</p>
-          <h2>{gameName} vs computer</h2>
+          <h2>{username} vs Computer</h2>
         </div>
         <div className="room-actions">
-          <ActionButton className="link" onClick={() => setConfirmation({ type: "quit" })}>
-            Quit game
+          <ActionButton
+            className="game-icon-button"
+            aria-label="Start a new game"
+            title="New game"
+            onClick={requestNewGame}
+            disabled={pending}
+          >
+            <GameActionIcon action="new-game" />
           </ActionButton>
+          <ActionButton
+            className="game-icon-button"
+            aria-label="Quit game"
+            title="Quit game"
+            onClick={() => setConfirmation({ type: "quit" })}
+          >
+            <GameActionIcon action="quit" />
+          </ActionButton>
+          <GameHelpButton gameId={gameId} gameName={gameName} rulebook={rulebook} />
         </div>
       </div>
 
       {loading ? (
         <p className="login-prompt">Loading your saved solo game...</p>
       ) : !game || game.status !== "active" ? (
-        <div className="game-info card solo-level-controls">
-          <p>
-            {game?.status === "finished"
-              ? levelWon
-                ? `You won level ${game.level}. ${highestLevel > game.level ? `Level ${game.level + 1} is unlocked.` : "You have reached the highest unlocked level."}`
-                : `Level ${game.level} is finished. Win to unlock the next level.`
-              : `Choose an unlocked level. Level ${highestLevel} is currently your highest.`}
-          </p>
-          <label className="solo-level-picker">
-            Level — {highestLevel} of 100 unlocked
+        <div className="solo-level-controls">
+          <label className="solo-level-picker solo-draughts-level">
+            <span>Level</span>
             <select
+              aria-label={`Select ${gameName} level`}
               value={level}
               onChange={(event) => setLevel(Number(event.target.value))}
               disabled={pending}
             >
               {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
-                <option key={unlocked} value={unlocked}>Level {unlocked}</option>
+                <option key={unlocked} value={unlocked}>{unlocked}</option>
               ))}
             </select>
           </label>
-          <ActionButton className="btn" onClick={() => void startGame()} disabled={pending}>
-            {pending ? "Starting..." : `Start level ${level}`}
+          <ActionButton
+            className="game-icon-button"
+            aria-label={`Start level ${level}`}
+            title={`Start level ${level}`}
+            onClick={() => void startGame()}
+            disabled={pending}
+          >
+            <GameActionIcon action="new-game" />
           </ActionButton>
         </div>
       ) : (
         <>
-          <div className="solo-level-controls card">
-            <strong>Level {game.level} · Computer opponent</strong>
-            <span>
-              {gameId === "golf" || gameId === "polo" || gameId === "snooker"
-                ? "The computer's score is generated for this difficulty level."
-                : "Win to unlock the next level. Each game keeps its own progress."}
-            </span>
-            <label className="solo-level-picker">
-              New game level
+          <div className="solo-level-controls">
+            <label className="solo-level-picker solo-draughts-level">
+              <span>Level</span>
               <select
+                aria-label={`Select ${gameName} level`}
                 value={level}
                 onChange={(event) => setLevel(Number(event.target.value))}
                 disabled={pending}
               >
                 {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
-                  <option key={unlocked} value={unlocked}>Level {unlocked}</option>
+                  <option key={unlocked} value={unlocked}>{unlocked}</option>
                 ))}
               </select>
             </label>
-            <ActionButton
-              className="link"
-              onClick={requestNewGame}
-              disabled={pending}
-            >
-              Start new game
-            </ActionButton>
           </div>
           {gameId === "chess" ? (
             <ChessBoard
@@ -2486,7 +2533,6 @@ function SoloGame({ token, gameId, onClose }) {
           }}
         />
       )}
-      <p className="practice-note">Free practice against the computer. An account is required; there are no stakes.</p>
     </section>
   );
 }
@@ -3419,9 +3465,6 @@ function HomeApp() {
   const sortedGames = [...games].sort((first, second) =>
     first.name.localeCompare(second.name, undefined, { sensitivity: "base" }),
   );
-  const activeGamePlayer = activeGame
-    ? activeGame.players[activeGame.viewer.side || activeGame.viewer.color]
-    : null;
   const activeGameName = activeGame
     ? games.find((game) => game.id === activeGame.game_id)?.name || activeGame.game_id
     : "";
@@ -3622,12 +3665,15 @@ function HomeApp() {
             token={session.token}
             username={session.username}
             displayName={session.display_name}
+            rulebook={rulebooks.draughts}
             onClose={quitSoloGame}
           />
         ) : (
           <SoloGame
             token={session.token}
             gameId={soloGameId}
+            username={session.username}
+            rulebook={rulebooks[soloGameId]}
             onClose={quitSoloGame}
           />
         )
@@ -3821,12 +3867,23 @@ function HomeApp() {
         >
           <div className="game-toolbar">
             <div>
-              <p className="eyebrow">FREE PRACTICE MATCH</p>
               <h2>{activeGameName}</h2>
             </div>
-            <ActionButton className="link" onClick={() => setConfirmQuitGame(true)}>
-              Quit game
-            </ActionButton>
+            <div className="room-actions">
+              <GameHelpButton
+                gameId={activeGame.game_id}
+                gameName={activeGameName}
+                rulebook={rulebooks[activeGame.game_id]}
+              />
+              <ActionButton
+                className="game-icon-button"
+                aria-label="Quit game"
+                title="Quit game"
+                onClick={() => setConfirmQuitGame(true)}
+              >
+                <GameActionIcon action="quit" />
+              </ActionButton>
+            </div>
           </div>
           {activeGame.game_id === "snooker" ? (
             <SnookerScorecard
@@ -3918,7 +3975,6 @@ function HomeApp() {
               />
             </div>
             <div className="game-info card">
-              <p>You are <strong>{activeGamePlayer}</strong> ({activeGame.viewer.side}).</p>
               <p>
                 {activeGame.status === "finished"
                   ? activeGame.state.winner_user_id === activeGame.viewer.user_id
@@ -3928,8 +3984,6 @@ function HomeApp() {
                     ? "Your turn. Select one of your highlighted pieces, then a destination."
                     : `Waiting for ${activeGame.players[activeGame.state.turn_user_id === activeGame.state.red_player_id ? "red" : "black"]} to move.`}
               </p>
-              <p>Red: {activeGame.players.red} · Black: {activeGame.players.black}</p>
-              <p className="practice-note">Practice only. No stakes or prizes.</p>
             </div>
           </div>
           )}
