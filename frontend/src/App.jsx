@@ -7,6 +7,7 @@ import {
   createSoloDraughtsGame,
   legalSoloDraughtsMoves,
 } from "./soloDraughts";
+import { findDirectionalTarget, getGamepadDirection } from "./gamepadNavigation";
 
 function ActionButton({ loading = false, disabled = false, onClick, children, ...props }) {
   const [clickPending, setClickPending] = useState(false);
@@ -40,11 +41,121 @@ function ActionButton({ loading = false, disabled = false, onClick, children, ..
   );
 }
 
+function ControllerNavigation() {
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator.getGamepads !== "function") return undefined;
+
+    let animationFrame = null;
+    let gamepadIndex = null;
+    let lastDirectionTime = 0;
+    let selectWasPressed = false;
+
+    function focusables() {
+      return Array.from(document.querySelectorAll(
+        'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => {
+        if (element.getAttribute("aria-disabled") === "true" || element.closest('[aria-hidden="true"]')) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      });
+    }
+
+    function moveFocus(direction) {
+      const available = focusables();
+      const target = findDirectionalTarget(document.activeElement, available, direction);
+      target?.focus();
+    }
+
+    function poll() {
+      animationFrame = null;
+      const gamepads = Array.from(navigator.getGamepads() || []);
+      const selectedPad = gamepadIndex === null ? null : gamepads[gamepadIndex];
+      const gamepad = selectedPad?.connected
+        ? selectedPad
+        : gamepads.find((pad) => pad?.connected);
+
+      if (!gamepad) {
+        gamepadIndex = null;
+        selectWasPressed = false;
+        setConnected(false);
+        return;
+      }
+
+      gamepadIndex = gamepad.index;
+      const now = performance.now();
+      const direction = getGamepadDirection(gamepad);
+      if (direction && now - lastDirectionTime >= 200) {
+        moveFocus(direction);
+        lastDirectionTime = now;
+      }
+
+      const selectPressed = Boolean(gamepad.buttons[0]?.pressed);
+      if (selectPressed && !selectWasPressed) {
+        const activeElement = document.activeElement;
+        if (activeElement !== document.body && typeof activeElement.click === "function") {
+          activeElement.click();
+        } else {
+          focusables()[0]?.focus();
+        }
+      }
+      selectWasPressed = selectPressed;
+      animationFrame = window.requestAnimationFrame(poll);
+    }
+
+    function startPolling(gamepad) {
+      gamepadIndex = gamepad.index;
+      setConnected(true);
+      if (animationFrame === null) animationFrame = window.requestAnimationFrame(poll);
+    }
+
+    function onConnected(event) {
+      startPolling(event.gamepad);
+    }
+
+    function onDisconnected(event) {
+      if (event.gamepad.index !== gamepadIndex) return;
+      const remainingPad = Array.from(navigator.getGamepads() || [])
+        .find((pad) => pad?.connected);
+      if (remainingPad) {
+        startPolling(remainingPad);
+        return;
+      }
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+      gamepadIndex = null;
+      selectWasPressed = false;
+      setConnected(false);
+    }
+
+    window.addEventListener("gamepadconnected", onConnected);
+    window.addEventListener("gamepaddisconnected", onDisconnected);
+    const connectedPad = Array.from(navigator.getGamepads() || [])
+      .find((pad) => pad?.connected);
+    if (connectedPad) startPolling(connectedPad);
+
+    return () => {
+      window.removeEventListener("gamepadconnected", onConnected);
+      window.removeEventListener("gamepaddisconnected", onDisconnected);
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    };
+  }, []);
+
+  if (!connected) return null;
+  return (
+    <div className="gamepad-help" role="status" aria-live="polite">
+      Controller connected · D-pad/stick to move · ✕ / A to select
+    </div>
+  );
+}
+
 function AuthForm({ mode, onDone, onModeChange }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -62,7 +173,7 @@ function AuthForm({ mode, onDone, onModeChange }) {
     setSubmitting(true);
     try {
       const session = mode === "signup"
-        ? await api.register(username, password, ageConfirmed, displayName, email)
+        ? await api.register(username, password, ageConfirmed)
         : await api.login(username, password);
       onDone(session);
     } catch (err) {
@@ -79,30 +190,6 @@ function AuthForm({ mode, onDone, onModeChange }) {
   return (
     <form ref={formRef} className="card auth" onSubmit={submit}>
       <h2>{mode === "signup" ? "Create your account" : "Log in"}</h2>
-      {mode === "signup" && (
-        <>
-          <label>
-            Display name (optional)
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              minLength={2}
-              maxLength={40}
-              autoComplete="name"
-            />
-          </label>
-          <label>
-            Email address (optional)
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              maxLength={254}
-              autoComplete="email"
-            />
-          </label>
-        </>
-      )}
       <label>
         Username
         <input
@@ -2620,6 +2707,13 @@ const INITIAL_GAMES = [
   { id: "golf", name: "Golf", players: "2-4", playable: true },
   { id: "ludo", name: "Ludo", players: "2-4", playable: true },
   { id: "polo", name: "Polo", players: "2", playable: true },
+  {
+    id: "ps5",
+    name: "PS5",
+    players: "TBD",
+    playable: false,
+    description: "PlayStation 5 support is planned, but not playable yet.",
+  },
   { id: "snooker", name: "Snooker", players: "2", playable: true },
   { id: "whot", name: "Whot", players: "2-4", playable: true },
 ];
@@ -3397,6 +3491,7 @@ function HomeApp() {
 
   return (
     <div className={`page${showSelectedGameOptions && selectedGame ? " has-mobile-game-options" : ""}${activeGame || soloGameOpen ? " game-focus" : ""}`}>
+      <ControllerNavigation />
       <nav>
         <span className="logo">Aus<b>Play</b></span>
         <div className="nav-links">
@@ -3483,7 +3578,9 @@ function HomeApp() {
                 {g.playable ? "Playable now" : "Coming soon"}
               </span>
               <h3>{g.name}</h3>
-              <p>{g.players === "TBD" ? "Player count to be announced" : `${g.players} players`}</p>
+              <p>
+                {g.description || (g.players === "TBD" ? "Player count to be announced" : `${g.players} players`)}
+              </p>
               {g.playable && <span className="game-action">Create or join a practice room</span>}
             </div>
           ))}

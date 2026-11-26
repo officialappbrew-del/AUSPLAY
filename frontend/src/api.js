@@ -31,15 +31,13 @@ async function request(path, options = {}, token) {
   return data;
 }
 
-export const register = (username, password, ageConfirmed, displayName, email) =>
+export const register = (username, password, ageConfirmed) =>
   request("/auth/register", {
     method: "POST",
     body: JSON.stringify({
       username,
       password,
       age_confirmed: ageConfirmed,
-      display_name: displayName?.trim() || null,
-      email: email?.trim() || null,
     }),
   });
 export const login = (username, password) =>

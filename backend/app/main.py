@@ -1431,6 +1431,13 @@ def games():
         {"id": "golf", "name": "Golf", "players": "2-4", "playable": True},
         {"id": "chess", "name": "Chess", "players": "2", "playable": True},
         {"id": "polo", "name": "Polo", "players": "2", "playable": True},
+        {
+            "id": "ps5",
+            "name": "PS5",
+            "players": "TBD",
+            "playable": False,
+            "description": "PlayStation 5 support is planned, but not playable yet.",
+        },
         {"id": "snooker", "name": "Snooker", "players": "2", "playable": True},
     ]
 

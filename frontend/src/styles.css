@@ -1,7 +1,9 @@
 :root { --bg:#0F1720; --surface:#17222E; --text:#F3F4F6; --muted:#A9B6C3; --accent:#F5B83D; }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
 .page { max-width:1120px; margin:0 auto; padding:0 32px; }
+.gamepad-help { position:fixed; z-index:20; left:50%; bottom:16px; max-width:calc(100vw - 24px); transform:translateX(-50%); padding:10px 16px; border:1px solid #ffffff3d; border-radius:999px; background:#17222E; color:var(--text); box-shadow:0 4px 18px #0008; font-size:14px; text-align:center; }
 nav { display:flex; justify-content:space-between; align-items:center; padding:32px 0; }
 .logo { font-family:"Space Grotesk",ui-sans-serif,system-ui,sans-serif; font-size:26px; font-weight:700; }
 .logo b { color:var(--accent); }
