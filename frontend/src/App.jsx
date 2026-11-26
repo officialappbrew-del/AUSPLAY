@@ -2528,13 +2528,13 @@ function PlayerProfile({ token }) {
 }
 
 const INITIAL_GAMES = [
-  { id: "ludo", name: "Ludo", players: "2-4", playable: true },
-  { id: "whot", name: "Whot", players: "2-4", playable: true },
+  { id: "chess", name: "Chess", players: "2", playable: true },
   { id: "draughts", name: "Draughts", players: "2", playable: true },
   { id: "golf", name: "Golf", players: "2-4", playable: true },
-  { id: "chess", name: "Chess", players: "2", playable: true },
+  { id: "ludo", name: "Ludo", players: "2-4", playable: true },
   { id: "polo", name: "Polo", players: "2", playable: true },
   { id: "snooker", name: "Snooker", players: "2", playable: true },
+  { id: "whot", name: "Whot", players: "2-4", playable: true },
 ];
 
 function PublicPlayerProfile({ username }) {
@@ -3224,6 +3224,9 @@ function HomeApp() {
     ? rooms.filter((room) => room.game_id === selectedGameFilter)
     : rooms;
   const selectedGame = games.find((game) => game.id === selectedGameFilter);
+  const sortedGames = [...games].sort((first, second) =>
+    first.name.localeCompare(second.name, undefined, { sensitivity: "base" }),
+  );
   const activeGamePlayer = activeGame
     ? activeGame.players[activeGame.viewer.side || activeGame.viewer.color]
     : null;
@@ -3335,6 +3338,34 @@ function HomeApp() {
         </div>
       </nav>
 
+      {mode && !session ? (
+        <AuthForm
+          mode={mode}
+          onDone={(s) => {
+            setSession({ ...s, role: s.role || "player" });
+            setMode(null);
+            if (s.email_verified === false) {
+              setNotice("Verify your email in your profile to enable account recovery.");
+            }
+            if (startSoloAfterAuth) {
+              setStartSoloAfterAuth(false);
+              setSoloGameOpen(true);
+            }
+          }}
+          onModeChange={setMode}
+        />
+      ) : (
+        <header className="hero">
+          <p className="eyebrow">PLAY FAIR. PLAY TOGETHER.</p>
+          <h1>Find your next<br />friendly challenge.</h1>
+          <p>Discover games, meet your players, and practise together.</p>
+          {!session && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
+          {session && wallet && (
+            <p className="wallet">Wallet: NGN {(wallet.available_kobo / 100).toLocaleString()}</p>
+          )}
+        </header>
+      )}
+
       <section className="games-section">
         <div className="section-heading">
           <div>
@@ -3344,7 +3375,7 @@ function HomeApp() {
           <p className="section-note">Free practice rooms. No deposits or stakes.</p>
         </div>
         <div className="grid">
-          {games.map((g) => (
+          {sortedGames.map((g) => (
             <div
               className={`card game-card${g.playable ? " selectable" : ""}${selectedGameFilter === g.id ? " selected" : ""}`}
               key={g.id}
@@ -3406,34 +3437,6 @@ function HomeApp() {
             onClose={quitSoloGame}
           />
         )
-      )}
-
-      {mode && !session ? (
-        <AuthForm
-          mode={mode}
-          onDone={(s) => {
-            setSession({ ...s, role: s.role || "player" });
-            setMode(null);
-            if (s.email_verified === false) {
-              setNotice("Verify your email in your profile to enable account recovery.");
-            }
-            if (startSoloAfterAuth) {
-              setStartSoloAfterAuth(false);
-              setSoloGameOpen(true);
-            }
-          }}
-          onModeChange={setMode}
-        />
-      ) : (
-        <header className="hero">
-          <p className="eyebrow">PLAY FAIR. PLAY TOGETHER.</p>
-          <h1>Find your next<br />friendly challenge.</h1>
-          <p>Discover games, meet your players, and practise together.</p>
-          {!session && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
-          {session && wallet && (
-            <p className="wallet">Wallet: NGN {(wallet.available_kobo / 100).toLocaleString()}</p>
-          )}
-        </header>
       )}
 
       {notice && <p className="notice" role="status" aria-live="polite">{notice}</p>}
