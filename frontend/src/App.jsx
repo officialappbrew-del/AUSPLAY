@@ -1302,6 +1302,11 @@ function GameActionIcon({ action }) {
           <path d="M9.7 9a2.4 2.4 0 1 1 4.1 1.7c-1 .9-1.8 1.2-1.8 2.8" />
           <path d="M12 17h.01" />
         </>
+      ) : action === "rotate" ? (
+        <>
+          <path d="M3 12a9 9 0 0 1 15-6l2 2M20 3v5h-5" />
+          <path d="M21 12a9 9 0 0 1-15 6l-2-2M4 21v-5h5" />
+        </>
       ) : action === "quit" ? (
         <>
           <path d="M10 17l5-5-5-5M15 12H3" />
@@ -1314,6 +1319,25 @@ function GameActionIcon({ action }) {
         </>
       )}
     </svg>
+  );
+}
+
+function orientBoard180(board, rotated) {
+  return rotated ? [...board].reverse().map((row) => [...row].reverse()) : board;
+}
+
+function RotateBoardButton({ rotated, onClick }) {
+  return (
+    <ActionButton
+      className="game-icon-button board-rotate-button"
+      type="button"
+      aria-label="Rotate board 180 degrees"
+      aria-pressed={rotated}
+      title="Rotate board 180°"
+      onClick={onClick}
+    >
+      <GameActionIcon action="rotate" />
+    </ActionButton>
   );
 }
 
@@ -1378,6 +1402,10 @@ function BoardPlayerLabel({ name, username = name, side, isTurn, gameActive = tr
 
 function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendingSquare }) {
   const { state, legal_moves: legalMoves, viewer, players } = game;
+  const [boardRotated, setBoardRotated] = useState(false);
+  const boardRows = orientBoard180(state.board, boardRotated);
+  const topPlayerColor = boardRotated ? "white" : "black";
+  const bottomPlayerColor = boardRotated ? "black" : "white";
   const activePlayer = players[state.turn_user_id === state.white_player_id ? "white" : "black"];
   const glyphs = {
     K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
@@ -1399,15 +1427,23 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
   return (
     <div className="game-layout">
       <div className="board-with-players">
+        <div className="board-tools">
+          <RotateBoardButton
+            rotated={boardRotated}
+            onClick={() => setBoardRotated((rotated) => !rotated)}
+          />
+        </div>
         <BoardPlayerLabel
-          name={game.player_display_names?.black || players.black}
-          username={players.black}
-          side="Black"
-          isTurn={state.turn_user_id === state.black_player_id}
+          name={game.player_display_names?.[topPlayerColor] || players[topPlayerColor]}
+          username={players[topPlayerColor]}
+          side={topPlayerColor === "white" ? "White" : "Black"}
+          isTurn={state.turn_user_id === state[`${topPlayerColor}_player_id`]}
           gameActive={state.status === "active"}
         />
         <div className="chess-board" role="grid" aria-label="Chess board">
-          {state.board.flatMap((row, y) => row.map((piece, x) => {
+          {boardRows.flatMap((row, displayY) => row.map((piece, displayX) => {
+            const x = boardRotated ? 7 - displayX : displayX;
+            const y = boardRotated ? 7 - displayY : displayY;
             const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
             const isTarget = targets.some((move) => move.to_x === x && move.to_y === y);
             const shade = (x + y) % 2 === 1 ? "dark" : "light";
@@ -1433,10 +1469,10 @@ function ChessBoard({ game, selectedSquare, onSquareClick, actionPending, pendin
           }))}
         </div>
         <BoardPlayerLabel
-          name={game.player_display_names?.white || players.white}
-          username={players.white}
-          side="White"
-          isTurn={state.turn_user_id === state.white_player_id}
+          name={game.player_display_names?.[bottomPlayerColor] || players[bottomPlayerColor]}
+          username={players[bottomPlayerColor]}
+          side={bottomPlayerColor === "white" ? "White" : "Black"}
+          isTurn={state.turn_user_id === state[`${bottomPlayerColor}_player_id`]}
           gameActive={state.status === "active"}
         />
       </div>
@@ -1943,6 +1979,7 @@ function WhotBoard({ game, onPlay, onDraw, actionPending }) {
 function SoloDraughts({ token, username, displayName, rulebook, onClose }) {
   const [game, setGame] = useState(createSoloDraughtsGame);
   const [selectedSquare, setSelectedSquare] = useState(null);
+  const [boardRotated, setBoardRotated] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [level, setLevel] = useState(1);
   const [gameLevel, setGameLevel] = useState(1);
@@ -1960,6 +1997,7 @@ function SoloDraughts({ token, username, displayName, rulebook, onClose }) {
   const [round, setRound] = useState(0);
   const recordedRound = useRef(null);
   const legalMoves = legalSoloDraughtsMoves(game, "player");
+  const boardRows = orientBoard180(game.board, boardRotated);
 
   useEffect(() => {
     let stopped = false;
@@ -2153,21 +2191,27 @@ function SoloDraughts({ token, username, displayName, rulebook, onClose }) {
       </div>
       <div className="solo-draughts-layout">
         <div className="board-with-players">
-          {progressLoaded && (
-            <label className="solo-level-picker solo-draughts-level">
-              <span>Level</span>
-              <select
-                aria-label="Select Draughts level"
-                value={level}
-                onChange={chooseLevel}
-                disabled={progressSaving}
-              >
-                {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
-                  <option key={unlocked} value={unlocked}>{unlocked}</option>
-                ))}
-              </select>
-            </label>
-          )}
+          <div className="board-tools">
+            {progressLoaded && (
+              <label className="solo-level-picker solo-draughts-level">
+                <span>Level</span>
+                <select
+                  aria-label="Select Draughts level"
+                  value={level}
+                  onChange={chooseLevel}
+                  disabled={progressSaving}
+                >
+                  {Array.from({ length: highestLevel }, (_, index) => index + 1).map((unlocked) => (
+                    <option key={unlocked} value={unlocked}>{unlocked}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <RotateBoardButton
+              rotated={boardRotated}
+              onClick={() => setBoardRotated((rotated) => !rotated)}
+            />
+          </div>
           <p className="sr-only" role="status" aria-live="polite">
             {statusMessage}
             {progressSaving ? " Saving your level progress." : ""}
@@ -2196,14 +2240,17 @@ function SoloDraughts({ token, username, displayName, rulebook, onClose }) {
             </div>
           )}
           <BoardPlayerLabel
-            name="Computer"
-            side="Black"
-            isTurn={game.turn === "computer"}
+            name={boardRotated ? displayName || username : "Computer"}
+            username={boardRotated ? username : undefined}
+            side={boardRotated ? "Red · You" : "Black"}
+            isTurn={boardRotated ? game.turn === "player" : game.turn === "computer"}
             gameActive={game.status === "active"}
           />
           <div className="draughts-board" aria-label="Solo Draughts board">
-            {game.board.flatMap((row, y) =>
-              row.map((piece, x) => {
+            {boardRows.flatMap((row, displayY) =>
+              row.map((piece, displayX) => {
+                const x = boardRotated ? 7 - displayX : displayX;
+                const y = boardRotated ? 7 - displayY : displayY;
                 const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
                 const isTarget = selectedSquare && legalMoves.some(
                   (move) =>
@@ -2238,10 +2285,10 @@ function SoloDraughts({ token, username, displayName, rulebook, onClose }) {
             )}
           </div>
           <BoardPlayerLabel
-            name={displayName || username}
-            username={username}
-            side="Red · You"
-            isTurn={game.turn === "player"}
+            name={boardRotated ? "Computer" : displayName || username}
+            username={boardRotated ? undefined : username}
+            side={boardRotated ? "Black" : "Red · You"}
+            isTurn={boardRotated ? game.turn === "computer" : game.turn === "player"}
             gameActive={game.status === "active"}
           />
         </div>
@@ -2980,6 +3027,7 @@ function HomeApp() {
   const [soloGameId, setSoloGameId] = useState("draughts");
   const [startSoloAfterAuth, setStartSoloAfterAuth] = useState(false);
   const [selectedSquare, setSelectedSquare] = useState(null);
+  const [draughtsBoardRotated, setDraughtsBoardRotated] = useState(false);
   const [notice, setNotice] = useState("");
   const [roomName, setRoomName] = useState("");
   const [gameId, setGameId] = useState("draughts");
@@ -3928,16 +3976,32 @@ function HomeApp() {
           ) : (
           <div className="game-layout">
             <div className="board-with-players">
+              <div className="board-tools">
+                <RotateBoardButton
+                  rotated={draughtsBoardRotated}
+                  onClick={() => setDraughtsBoardRotated((rotated) => !rotated)}
+                />
+              </div>
               <BoardPlayerLabel
-                name={activeGame.player_display_names?.black || activeGame.players.black}
-                username={activeGame.players.black}
-                side="Black"
-                isTurn={activeGame.state.turn_user_id === activeGame.state.black_player_id}
+                name={draughtsBoardRotated
+                  ? activeGame.player_display_names?.red || activeGame.players.red
+                  : activeGame.player_display_names?.black || activeGame.players.black}
+                username={draughtsBoardRotated
+                  ? activeGame.players.red
+                  : activeGame.players.black}
+                side={draughtsBoardRotated ? "Red" : "Black"}
+                isTurn={activeGame.state.turn_user_id === (
+                  draughtsBoardRotated
+                    ? activeGame.state.red_player_id
+                    : activeGame.state.black_player_id
+                )}
                 gameActive={activeGame.state.status === "active"}
               />
               <div className="draughts-board" aria-label="Draughts board">
-                {activeGame.state.board.flatMap((row, y) =>
-                  row.map((piece, x) => {
+                {orientBoard180(activeGame.state.board, draughtsBoardRotated)
+                  .flatMap((row, displayY) => row.map((piece, displayX) => {
+                    const x = draughtsBoardRotated ? 7 - displayX : displayX;
+                    const y = draughtsBoardRotated ? 7 - displayY : displayY;
                     const isSelected = selectedSquare?.x === x && selectedSquare?.y === y;
                     const isTarget = selectedSquare && activeGame.legal_moves.some(
                       (move) =>
@@ -3967,10 +4031,18 @@ function HomeApp() {
                 )}
               </div>
               <BoardPlayerLabel
-                name={activeGame.player_display_names?.red || activeGame.players.red}
-                username={activeGame.players.red}
-                side="Red"
-                isTurn={activeGame.state.turn_user_id === activeGame.state.red_player_id}
+                name={draughtsBoardRotated
+                  ? activeGame.player_display_names?.black || activeGame.players.black
+                  : activeGame.player_display_names?.red || activeGame.players.red}
+                username={draughtsBoardRotated
+                  ? activeGame.players.black
+                  : activeGame.players.red}
+                side={draughtsBoardRotated ? "Black" : "Red"}
+                isTurn={activeGame.state.turn_user_id === (
+                  draughtsBoardRotated
+                    ? activeGame.state.black_player_id
+                    : activeGame.state.red_player_id
+                )}
                 gameActive={activeGame.state.status === "active"}
               />
             </div>
