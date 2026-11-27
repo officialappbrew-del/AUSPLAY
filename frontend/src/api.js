@@ -89,6 +89,16 @@ export const placeVirtualBet = (token, roundId, bet) =>
     method: "POST",
     body: JSON.stringify(bet),
   }, token);
+export const getVirtualGamesCatalogue = () => request("/virtual-games/catalogue");
+export const initializeWalletDeposit = (token, deposit) =>
+  request("/wallet/deposits", {
+    method: "POST",
+    body: JSON.stringify(deposit),
+  }, token);
+export const verifyWalletDeposit = (token, reference) =>
+  request(`/wallet/deposits/${encodeURIComponent(reference)}/verify`, {
+    method: "POST",
+  }, token);
 export const getPaystackBanks = (token) => request("/payments/paystack/banks", {}, token);
 export const requestWalletWithdrawal = (token, withdrawal) =>
   request("/wallet/withdrawals", {

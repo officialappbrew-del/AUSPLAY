@@ -54,8 +54,8 @@ The Virtual Games section presents outcomes from completed AusPlay matches in 60
 prediction rounds. Player labels are anonymous, and the stored result is revealed only after
 the round closes. A real-money round is available only after at least 10 completed matches for
 the same game and player count. If there is not enough history, a clearly labeled demo round is
-shown; demo rounds are generated for illustration, accept no NGN stakes, and are not counted as
-real match history. Existing demo records are removed when eligible real match history becomes
+shown; demo rounds are generated for illustration, allow free picks with no NGN stakes or payouts,
+and are not counted as real match history. Existing demo records are removed when eligible real match history becomes
 available, and real results are recycled rather than replaced with more demos. Predictors share
 the losing stakes proportionally, with 10% of losing stakes
 retained as commission. If no predictor selected the result, all stakes are refunded. These are
@@ -64,12 +64,13 @@ Some games use player-entered scorecards; those scores are not independently ver
 completed-match history must not be presented as externally verified results.
 
 Wallet balances are held in integer kobo. New accounts start at NGN 0; there is no automatic
-NGN 5,000 grant. Only an administrator can top up a wallet, after verifying the funding outside
-the application. Top-ups are recorded with an audit reference and reason. Paystack is used for
-bank withdrawals; it does not currently accept player deposits. The Paystack secret must be
-configured on the backend, and the Paystack webhook must point to
-`/payments/paystack/webhook`. Keep withdrawals disabled until the Paystack account, available
-transfer balance, webhook, and supported jurisdiction are configured and verified.
+NGN 5,000 grant. Players can fund wallets through Paystack checkout, and only an administrator
+can issue manual top-ups after verifying the funding outside the application. Top-ups are recorded
+with an audit reference and reason. Paystack deposits are credited only after server-side
+transaction verification or a signed webhook, with the amount and currency checked against the
+pending deposit. The Paystack secret must be configured on the backend, and the Paystack webhook
+must point to `/payments/paystack/webhook`. Keep deposits and withdrawals disabled until the
+Paystack account, webhook, and supported jurisdiction are configured and verified.
 
 These features handle money and are not a substitute for legal, payment-provider, age, KYC,
 consumer-protection, or responsible-play review. Do not launch them to users until the required

@@ -97,7 +97,7 @@ def upgrade() -> None:
     op.create_index(
         "uq_virtual_rounds_single_open",
         "virtual_rounds",
-        ["status"],
+        ["game_id", "participant_count"],
         unique=True,
         postgresql_where=sa.text("status = 'open'"),
         sqlite_where=sa.text("status = 'open'"),
@@ -112,7 +112,7 @@ def upgrade() -> None:
         sa.Column("payout_kobo", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("stake_kobo > 0", name="ck_virtual_bet_stake"),
+        sa.CheckConstraint("stake_kobo >= 0", name="ck_virtual_bet_stake"),
         sa.ForeignKeyConstraint(["round_id"], ["virtual_rounds.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),

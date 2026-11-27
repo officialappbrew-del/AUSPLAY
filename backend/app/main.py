@@ -158,7 +158,7 @@ class PracticeRoomCreate(BaseModel):
 
 class VirtualBetSubmission(BaseModel):
     outcome_key: str = Field(min_length=1, max_length=16)
-    stake_kobo: int = Field(ge=100, le=50_000_000)
+    stake_kobo: int = Field(ge=0, le=50_000_000)
 
 
 class AdminWalletTopUpRequest(BaseModel):
@@ -178,6 +178,16 @@ class WalletWithdrawalRequest(BaseModel):
     account_name: str = Field(min_length=2, max_length=100)
     account_number: str = Field(pattern=r"^\d{10}$")
     bank_code: str = Field(min_length=2, max_length=16, pattern=r"^\d+$")
+
+
+class WalletDepositRequest(BaseModel):
+    amount_kobo: int = Field(ge=10_000, le=50_000_000)
+    request_key: str = Field(
+        min_length=16,
+        max_length=48,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    email: str = Field(min_length=3, max_length=254)
 
 
 class PaystackTransferOTP(BaseModel):
@@ -2330,6 +2340,24 @@ def _round_odds(records: list[dict], source: dict) -> tuple[dict[str, int], int]
     return odds, len(history)
 
 
+def _delete_demo_rounds(db: Session, game_id: str) -> None:
+    demo_round_ids = select(models.VirtualRound.id).where(
+        models.VirtualRound.is_demo.is_(True),
+        models.VirtualRound.game_id == game_id,
+    )
+    db.execute(
+        delete(models.VirtualBet).where(
+            models.VirtualBet.round_id.in_(demo_round_ids)
+        )
+    )
+    db.execute(
+        delete(models.VirtualRound).where(
+            models.VirtualRound.is_demo.is_(True),
+            models.VirtualRound.game_id == game_id,
+        )
+    )
+
+
 def _settle_virtual_round(db: Session, virtual_round: models.VirtualRound) -> None:
     if virtual_round.status != "open":
         return
@@ -2339,6 +2367,13 @@ def _settle_virtual_round(db: Session, virtual_round: models.VirtualRound) -> No
         .where(models.VirtualBet.round_id == virtual_round.id)
         .with_for_update()
     ).all()
+    if virtual_round.is_demo:
+        for bet in bets:
+            bet.payout_kobo = 0
+            bet.updated_at = now
+        virtual_round.status = "settled"
+        virtual_round.settled_at = now
+        return
     winning_bets = [
         bet for bet in bets if bet.outcome_key == virtual_round.outcome_key
     ]
@@ -2437,29 +2472,30 @@ def _virtual_outcome_label(outcome_key: str) -> str:
     raise RuntimeError(f"Invalid virtual-round outcome: {outcome_key}")
 
 
-def _open_or_rotate_virtual_round(db: Session) -> models.VirtualRound | None:
+def _open_or_rotate_virtual_round(
+    db: Session,
+    game_id: str,
+    participant_count: int,
+    records: list[dict],
+) -> models.VirtualRound:
+    history = [
+        record for record in records
+        if record["game_id"] == game_id
+        and record["participant_count"] == participant_count
+    ]
     virtual_round = db.scalar(
         select(models.VirtualRound)
-        .where(models.VirtualRound.status == "open")
+        .where(
+            models.VirtualRound.status == "open",
+            models.VirtualRound.game_id == game_id,
+            models.VirtualRound.participant_count == participant_count,
+        )
         .with_for_update()
     )
-    records = None
     if virtual_round is not None:
         if virtual_round.is_demo:
-            records = _completed_historical_records(db)
-            historical_counts = Counter(
-                (record["game_id"], record["participant_count"])
-                for record in records
-            )
-            has_eligible_history = any(
-                count >= 10 for count in historical_counts.values()
-            )
-            if has_eligible_history:
-                db.execute(
-                    delete(models.VirtualRound).where(
-                        models.VirtualRound.is_demo.is_(True)
-                    )
-                )
+            if len(history) >= 10:
+                _delete_demo_rounds(db, game_id)
                 virtual_round = None
             elif _as_utc(virtual_round.closes_at) > _as_utc(models.now()):
                 return virtual_round
@@ -2468,36 +2504,26 @@ def _open_or_rotate_virtual_round(db: Session) -> models.VirtualRound | None:
     if virtual_round is not None:
         _settle_virtual_round(db, virtual_round)
 
-    if records is None:
-        records = _completed_historical_records(db)
-    historical_counts = Counter(
-        (record["game_id"], record["participant_count"])
-        for record in records
-    )
-    source_usage_counts = {
-        (game_id, source_game_id): count
-        for game_id, source_game_id, count in db.execute(
-            select(
-                models.VirtualRound.game_id,
-                models.VirtualRound.source_game_id,
-                func.count(models.VirtualRound.id),
-            )
-            .where(models.VirtualRound.is_demo.is_(False))
-            .group_by(models.VirtualRound.game_id, models.VirtualRound.source_game_id)
-        ).all()
-    }
-    available = [
-        record for record in records
-        if historical_counts[(record["game_id"], record["participant_count"])] >= 10
-    ]
-    if available:
+    if len(history) >= 10:
+        source_usage_counts = {
+            source_game_id: count
+            for source_game_id, count in db.execute(
+                select(
+                    models.VirtualRound.source_game_id,
+                    func.count(models.VirtualRound.id),
+                )
+                .where(
+                    models.VirtualRound.is_demo.is_(False),
+                    models.VirtualRound.game_id == game_id,
+                    models.VirtualRound.participant_count == participant_count,
+                )
+                .group_by(models.VirtualRound.source_game_id)
+            ).all()
+        }
         source = min(
-            available,
+            history,
             key=lambda record: (
-                source_usage_counts.get(
-                    (record["game_id"], record["source_game_id"]),
-                    0,
-                ),
+                source_usage_counts.get(record["source_game_id"], 0),
                 _as_utc(record["updated_at"]),
             ),
         )
@@ -2518,15 +2544,18 @@ def _open_or_rotate_virtual_round(db: Session) -> models.VirtualRound | None:
     else:
         prior_demo_ids = db.scalars(
             select(models.VirtualRound.source_game_id).where(
-                models.VirtualRound.is_demo.is_(True)
+                models.VirtualRound.is_demo.is_(True),
+                models.VirtualRound.game_id == game_id,
             )
         ).all()
         next_demo_id = min([0, *[demo_id or 0 for demo_id in prior_demo_ids]]) - 1
-        participant_count = 2
-        demo_outcomes = ["player_1", "player_2", "draw"]
+        demo_outcomes = [
+            *[f"player_{index}" for index in range(1, participant_count + 1)],
+            "draw",
+        ]
         odds = {outcome: 0 for outcome in demo_outcomes}
         virtual_round = models.VirtualRound(
-            game_id="chess",
+            game_id=game_id,
             source_game_id=next_demo_id,
             source_room_id=None,
             participant_count=participant_count,
@@ -2543,6 +2572,45 @@ def _open_or_rotate_virtual_round(db: Session) -> models.VirtualRound | None:
     return virtual_round
 
 
+VIRTUAL_GAME_LABELS = {
+    "chess": "Chess",
+    "draughts": "Draughts",
+    "golf": "Golf",
+    "ludo": "Ludo",
+    "polo": "Polo",
+    "snooker": "Snooker",
+    "whot": "Whot",
+}
+
+
+@app.get("/virtual-games/catalogue")
+def get_virtual_games_catalogue(db: Session = Depends(get_db)):
+    records = _completed_historical_records(db)
+    history_counts = Counter(
+        (record["game_id"], record["participant_count"])
+        for record in records
+    )
+    games = []
+    for game_id, label in VIRTUAL_GAME_LABELS.items():
+        eligible_player_counts = sorted(
+            participant_count
+            for (record_game_id, participant_count), count in history_counts.items()
+            if record_game_id == game_id and count >= 10
+        )
+        games.append({
+            "game_id": game_id,
+            "name": label,
+            "completed_matches": sum(
+                count
+                for (record_game_id, _), count in history_counts.items()
+                if record_game_id == game_id
+            ),
+            "eligible_player_counts": eligible_player_counts,
+            "demo_only": not eligible_player_counts,
+        })
+    return {"games": games}
+
+
 @app.get("/virtual-games")
 def get_virtual_games(
     user: models.User = Depends(current_user),
@@ -2555,27 +2623,49 @@ def get_virtual_games(
     )
     if wallet_user is None:
         raise HTTPException(401, "Not authenticated")
+    records = _completed_historical_records(db)
+    history_counts = Counter(
+        (record["game_id"], record["participant_count"])
+        for record in records
+    )
+    eligible_pairs = {
+        pair for pair, count in history_counts.items()
+        if count >= 10
+    }
+    eligible_games = {game_id for game_id, _ in eligible_pairs}
+    for game_id in eligible_games:
+        _delete_demo_rounds(db, game_id)
+    round_keys = sorted(eligible_pairs)
+    round_keys.extend(
+        (game_id, 2)
+        for game_id in VIRTUAL_GAME_LABELS
+        if game_id not in eligible_games
+    )
     try:
-        virtual_round = _open_or_rotate_virtual_round(db)
+        virtual_rounds = [
+            _open_or_rotate_virtual_round(db, game_id, participant_count, records)
+            for game_id, participant_count in round_keys
+        ]
         db.commit()
     except IntegrityError:
         db.rollback()
-        virtual_round = db.scalar(
+        virtual_rounds = db.scalars(
             select(models.VirtualRound)
             .where(models.VirtualRound.status == "open")
-            .order_by(models.VirtualRound.id.desc())
-        )
-        if virtual_round is None:
+            .order_by(models.VirtualRound.game_id, models.VirtualRound.participant_count)
+        ).all()
+        if not virtual_rounds:
             raise HTTPException(409, "A new virtual round could not be opened; refresh and try again")
 
-    my_bet = None
-    if virtual_round is not None and virtual_round.status == "open":
-        my_bet = db.scalar(
+    my_bets = {
+        bet.round_id: bet
+        for bet in db.scalars(
             select(models.VirtualBet).where(
-                models.VirtualBet.round_id == virtual_round.id,
+                models.VirtualBet.round_id.in_([round_row.id for round_row in virtual_rounds]),
                 models.VirtualBet.user_id == user.id,
             )
-        )
+        ).all()
+    } if virtual_rounds else {}
     recent_bets = db.execute(
         select(models.VirtualBet, models.VirtualRound)
         .join(models.VirtualRound, models.VirtualRound.id == models.VirtualBet.round_id)
@@ -2589,23 +2679,16 @@ def get_virtual_games(
         .order_by(models.VirtualRound.settled_at.desc())
         .limit(10)
     ).all()
-    labels = {
-        "draughts": "Draughts",
-        "chess": "Chess",
-        "golf": "Golf",
-        "polo": "Polo",
-        "snooker": "Snooker",
-        "ludo": "Ludo",
-        "whot": "Whot",
-    }
+    active_rounds = [
+        _public_virtual_round(round_row, my_bets.get(round_row.id))
+        for round_row in virtual_rounds
+        if round_row.status == "open"
+    ]
     return {
         "available_kobo": _wallet_balance(db, user.id),
         "locked_kobo": _wallet_balance(db, user.id, "locked"),
-        "active_round": (
-            _public_virtual_round(virtual_round, my_bet)
-            if virtual_round is not None and virtual_round.status == "open"
-            else None
-        ),
+        "active_round": active_rounds[0] if active_rounds else None,
+        "active_rounds": active_rounds,
         "recent_bets": [
             {
                 "round_id": bet.round_id,
@@ -2620,6 +2703,8 @@ def get_virtual_games(
                 "payout_kobo": bet.payout_kobo,
                 "status": (
                     "pending" if bet.payout_kobo is None
+                    else "demo_correct" if round_row.is_demo and bet.outcome_key == round_row.outcome_key
+                    else "demo_missed" if round_row.is_demo
                     else "won" if bet.outcome_key == round_row.outcome_key
                     else "refunded" if bet.payout_kobo == bet.stake_kobo
                     else "lost"
@@ -2632,7 +2717,7 @@ def get_virtual_games(
             {
                 "id": round_row.id,
                 "game_id": round_row.game_id,
-                "game_name": labels.get(round_row.game_id, round_row.game_id.title()),
+                "game_name": VIRTUAL_GAME_LABELS.get(round_row.game_id, round_row.game_id.title()),
                 "participant_count": round_row.participant_count,
                 "result": _virtual_outcome_label(round_row.outcome_key),
                 "is_demo": round_row.is_demo,
@@ -2662,12 +2747,42 @@ def place_virtual_bet(
             _settle_virtual_round(db, virtual_round)
             db.commit()
         raise HTTPException(409, "This virtual round is closed")
-    if virtual_round.is_demo:
-        raise HTTPException(409, "Demo rounds cannot accept NGN stakes")
-    if virtual_round.sample_size < 9:
-        raise HTTPException(409, "This round does not have enough completed-match history for NGN stakes")
     if body.outcome_key not in virtual_round.odds:
         raise HTTPException(422, "Choose an outcome offered in this round")
+    if virtual_round.is_demo:
+        if body.stake_kobo != 0:
+            raise HTTPException(409, "Demo rounds cannot accept NGN stakes")
+        bet = db.scalar(
+            select(models.VirtualBet)
+            .where(
+                models.VirtualBet.round_id == round_id,
+                models.VirtualBet.user_id == user.id,
+            )
+            .with_for_update()
+        )
+        if bet is None:
+            db.add(
+                models.VirtualBet(
+                    round_id=round_id,
+                    user_id=user.id,
+                    outcome_key=body.outcome_key,
+                    stake_kobo=0,
+                )
+            )
+        else:
+            bet.outcome_key = body.outcome_key
+            bet.payout_kobo = None
+            bet.updated_at = models.now()
+        db.commit()
+        return {
+            "available_kobo": _wallet_balance(db, user.id),
+            "saved": True,
+            "demo": True,
+        }
+    if body.stake_kobo < 100:
+        raise HTTPException(422, "An NGN prediction stake must be at least NGN 1.00")
+    if virtual_round.sample_size < 9:
+        raise HTTPException(409, "This round does not have enough completed-match history for NGN stakes")
     wallet_user = db.scalar(
         select(models.User)
         .where(models.User.id == user.id)
@@ -3266,6 +3381,12 @@ def wallet(user: models.User = Depends(current_user), db: Session = Depends(get_
         .order_by(models.WalletWithdrawal.created_at.desc())
         .limit(10)
     ).all()
+    deposits = db.scalars(
+        select(models.WalletDeposit)
+        .where(models.WalletDeposit.user_id == user.id)
+        .order_by(models.WalletDeposit.created_at.desc())
+        .limit(10)
+    ).all()
     return {
         "currency": "NGN",
         "available_kobo": _wallet_balance(db, user.id),
@@ -3289,6 +3410,16 @@ def wallet(user: models.User = Depends(current_user), db: Session = Depends(get_
                 "created_at": withdrawal.created_at,
             }
             for withdrawal in withdrawals
+        ],
+        "deposits": [
+            {
+                "reference": deposit.reference,
+                "amount_kobo": deposit.amount_kobo,
+                "status": deposit.status,
+                "status_detail": deposit.status_detail,
+                "created_at": deposit.created_at,
+            }
+            for deposit in deposits
         ],
     }
 
@@ -3414,6 +3545,30 @@ def _paystack_request(method: str, path: str, payload: dict | None = None):
     return response_body.get("data")
 
 
+def _finish_wallet_deposit(
+    db: Session,
+    deposit: models.WalletDeposit,
+    status: str,
+    detail: str | None = None,
+) -> None:
+    if deposit.status != "pending":
+        return
+    now = models.now()
+    if status == "success":
+        db.add(
+            models.LedgerEntry(
+                user_id=deposit.user_id,
+                account="available",
+                amount=deposit.amount_kobo,
+                ref=f"deposit:{deposit.reference}:credit",
+            )
+        )
+    deposit.status = status
+    deposit.status_detail = detail
+    deposit.updated_at = now
+    deposit.settled_at = now
+
+
 def _finish_wallet_withdrawal(
     db: Session,
     withdrawal: models.WalletWithdrawal,
@@ -3462,6 +3617,148 @@ def paystack_banks(user: models.User = Depends(current_user)):
         for bank in banks
         if isinstance(bank, dict) and bank.get("name") and bank.get("code")
     ]
+
+
+@app.post("/wallet/deposits", status_code=201)
+def initialize_wallet_deposit(
+    body: WalletDepositRequest,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if not os.getenv("PAYSTACK_SECRET_KEY"):
+        raise HTTPException(503, "Paystack wallet funding is not configured")
+    email = _normalize_email(body.email)
+    reference = f"ausplay-deposit-{body.request_key}"
+    existing = db.scalar(
+        select(models.WalletDeposit).where(
+            models.WalletDeposit.user_id == user.id,
+            models.WalletDeposit.reference == reference,
+        )
+    )
+    if existing is not None:
+        if existing.amount_kobo != body.amount_kobo:
+            raise HTTPException(409, "This payment request key was already used for a different amount")
+        if existing.authorization_url:
+            return {
+                "reference": existing.reference,
+                "status": existing.status,
+                "authorization_url": existing.authorization_url,
+            }
+        raise HTTPException(409, "This payment request is already being processed; use a new request")
+
+    deposit = models.WalletDeposit(
+        user_id=user.id,
+        amount_kobo=body.amount_kobo,
+        reference=reference,
+        status="pending",
+    )
+    db.add(deposit)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Payment request could not be created; try again") from exc
+
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    callback_url = f"{frontend_url}/?payment=wallet&reference={reference}#predictions"
+    try:
+        transaction = _paystack_request(
+            "POST",
+            "/transaction/initialize",
+            {
+                "email": email,
+                "amount": body.amount_kobo,
+                "currency": "NGN",
+                "reference": reference,
+                "callback_url": callback_url,
+                "metadata": {
+                    "user_id": user.id,
+                    "purpose": "ausplay_wallet_funding",
+                },
+            },
+        )
+    except PaystackAPIError as exc:
+        deposit.status = "failed"
+        deposit.status_detail = exc.message[:240]
+        deposit.updated_at = models.now()
+        deposit.settled_at = models.now()
+        db.commit()
+        raise HTTPException(502, exc.message) from exc
+    except PaystackTransportError as exc:
+        deposit.status_detail = "Could not confirm checkout initialization; retry with a new payment request"
+        deposit.updated_at = models.now()
+        db.commit()
+        raise HTTPException(503, deposit.status_detail) from exc
+    if (
+        not isinstance(transaction, dict)
+        or transaction.get("reference") != reference
+        or not isinstance(transaction.get("authorization_url"), str)
+        or not transaction["authorization_url"].startswith("https://checkout.paystack.com/")
+    ):
+        deposit.status = "failed"
+        deposit.status_detail = "Paystack returned an invalid checkout response"
+        deposit.updated_at = models.now()
+        deposit.settled_at = models.now()
+        db.commit()
+        raise HTTPException(502, deposit.status_detail)
+
+    deposit.authorization_url = transaction["authorization_url"]
+    deposit.updated_at = models.now()
+    db.commit()
+    return {
+        "reference": reference,
+        "status": deposit.status,
+        "authorization_url": deposit.authorization_url,
+    }
+
+
+@app.post("/wallet/deposits/{reference}/verify")
+def verify_wallet_deposit(
+    reference: str,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    deposit = db.scalar(
+        select(models.WalletDeposit)
+        .where(
+            models.WalletDeposit.reference == reference,
+            models.WalletDeposit.user_id == user.id,
+        )
+        .with_for_update()
+    )
+    if deposit is None:
+        raise HTTPException(404, "Wallet deposit not found")
+    if deposit.status != "pending":
+        return {
+            "reference": deposit.reference,
+            "status": deposit.status,
+            "amount_kobo": deposit.amount_kobo,
+        }
+    try:
+        transaction = _paystack_request("GET", f"/transaction/verify/{reference}")
+    except PaystackAPIError as exc:
+        raise HTTPException(502, exc.message) from exc
+    except PaystackTransportError as exc:
+        raise HTTPException(503, "Could not verify the payment with Paystack; try again") from exc
+    if not isinstance(transaction, dict) or transaction.get("reference") != reference:
+        raise HTTPException(502, "Paystack returned an invalid transaction verification response")
+    provider_amount = transaction.get("amount")
+    if (
+        transaction.get("currency") != "NGN"
+        or isinstance(provider_amount, bool)
+        or provider_amount != deposit.amount_kobo
+    ):
+        raise HTTPException(409, "Paystack payment amount does not match the requested wallet funding")
+    if transaction.get("status") == "success":
+        _finish_wallet_deposit(db, deposit, "success")
+    elif transaction.get("status") in {"failed", "abandoned"}:
+        _finish_wallet_deposit(db, deposit, "failed", "Paystack payment was not completed")
+    db.commit()
+    return {
+        "reference": deposit.reference,
+        "status": deposit.status,
+        "amount_kobo": deposit.amount_kobo,
+    }
 
 
 @app.post("/wallet/withdrawals", status_code=202)
@@ -3628,6 +3925,37 @@ async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(400, "Invalid Paystack webhook payload")
     event_name = event.get("event")
     data = event.get("data")
+    if event_name in {"charge.success", "charge.failed"}:
+        reference = data.get("reference") if isinstance(data, dict) else None
+        if not isinstance(reference, str):
+            raise HTTPException(400, "Paystack payment webhook is missing its reference")
+        deposit = db.scalar(
+            select(models.WalletDeposit)
+            .where(models.WalletDeposit.reference == reference)
+            .with_for_update()
+        )
+        if deposit is None:
+            logger.warning("Paystack payment webhook had unknown reference %s", reference)
+            return {"received": True}
+        if event_name == "charge.success":
+            amount = data.get("amount")
+            if (
+                data.get("status") != "success"
+                or data.get("currency") != "NGN"
+                or isinstance(amount, bool)
+                or amount != deposit.amount_kobo
+            ):
+                raise HTTPException(400, "Paystack payment webhook does not match the requested deposit")
+            _finish_wallet_deposit(db, deposit, "success")
+        else:
+            _finish_wallet_deposit(
+                db,
+                deposit,
+                "failed",
+                "Paystack payment was not completed",
+            )
+        db.commit()
+        return {"received": True}
     if event_name not in {"transfer.success", "transfer.failed", "transfer.reversed"}:
         return {"received": True}
     reference = data.get("reference") if isinstance(data, dict) else None

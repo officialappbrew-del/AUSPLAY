@@ -145,6 +145,23 @@ class WalletWithdrawal(Base):
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class WalletDeposit(Base):
+    __tablename__ = "wallet_deposits"
+    __table_args__ = (
+        CheckConstraint("amount_kobo > 0", name="ck_wallet_deposit_amount"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount_kobo: Mapped[int] = mapped_column(Integer)
+    reference: Mapped[str] = mapped_column(String(80), unique=True)
+    authorization_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    status_detail: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PracticeMatchSettlement(Base):
     __tablename__ = "practice_match_settlements"
     room_id: Mapped[int] = mapped_column(
@@ -162,7 +179,8 @@ class VirtualRound(Base):
         CheckConstraint("participant_count >= 2", name="ck_virtual_round_participant_count"),
         Index(
             "uq_virtual_rounds_single_open",
-            "status",
+            "game_id",
+            "participant_count",
             unique=True,
             postgresql_where=text("status = 'open'"),
             sqlite_where=text("status = 'open'"),
@@ -190,7 +208,7 @@ class VirtualBet(Base):
     __tablename__ = "virtual_bets"
     __table_args__ = (
         UniqueConstraint("round_id", "user_id"),
-        CheckConstraint("stake_kobo > 0", name="ck_virtual_bet_stake"),
+        CheckConstraint("stake_kobo >= 0", name="ck_virtual_bet_stake"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     round_id: Mapped[int] = mapped_column(ForeignKey("virtual_rounds.id"), index=True)

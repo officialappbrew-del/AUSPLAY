@@ -53,16 +53,16 @@ local `.env` file.
    | `SMTP_USERNAME` | SMTP username, if required b  y the provider |
    | `SMTP_PASSWORD` | SMTP password or provider app password; configure only in Render |
    | `SMTP_FROM_EMAIL` | Verified sender address for AusPlay email |
-   | `PAYSTACK_SECRET_KEY` | Paystack secret key; configure only in Render when withdrawals are enabled |
+   | `PAYSTACK_SECRET_KEY` | Paystack secret key; configure only in Render when wallet payments are enabled |
 
    Generate a local secret if needed with
    `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Add the output only
    to Render's environment settings.
    Never add the Paystack secret to a `VITE_` variable or frontend deployment. Configure the
-   Paystack transfer webhook to `https://<backend-origin>/payments/paystack/webhook`, and
-   verify withdrawals and webhook delivery in a non-production environment first. Wallet
-   top-ups are administrator-recorded after external funding verification; player deposits
-   are not currently implemented.
+   Paystack webhook to `https://<backend-origin>/payments/paystack/webhook`, and verify
+   deposits, transfers, and webhook delivery in a non-production environment first. The
+   Paystack callback uses `FRONTEND_URL`. Wallet deposits are credited only after server-side
+   transaction verification or a valid signed webhook.
 4. Deploy the service and use its public HTTPS URL:
    `https://ausplay.onrender.com`.
 5. Open `https://ausplay.onrender.com/` for the API status response and

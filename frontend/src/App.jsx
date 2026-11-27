@@ -1516,12 +1516,17 @@ function NavigationIcon({ name }) {
 function VirtualGamesWorkspace({ session, games, onLogin }) {
   const [data, setData] = useState(null);
   const [wallet, setWallet] = useState(null);
+  const [catalogue, setCatalogue] = useState([]);
+  const [catalogueLoading, setCatalogueLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [outcomeKey, setOutcomeKey] = useState("");
-  const [stake, setStake] = useState("10");
+  const [outcomes, setOutcomes] = useState({});
+  const [stakes, setStakes] = useState({});
   const [saving, setSaving] = useState(false);
+  const [fundingOpen, setFundingOpen] = useState(false);
+  const [funding, setFunding] = useState({ amount: "", email: "" });
+  const [fundingPending, setFundingPending] = useState(false);
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
   const [banks, setBanks] = useState([]);
   const [withdrawal, setWithdrawal] = useState({
@@ -1532,7 +1537,6 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
   });
   const [withdrawing, setWithdrawing] = useState(false);
   const [clock, setClock] = useState(Date.now());
-  const draftRoundId = useRef(null);
 
   useEffect(() => {
     if (!session) {
@@ -1540,8 +1544,21 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
       setWallet(null);
       setLoading(false);
       setError("");
-      draftRoundId.current = null;
-      return undefined;
+      setCatalogueLoading(true);
+      let stopped = false;
+      api.getVirtualGamesCatalogue()
+        .then((result) => {
+          if (!stopped) setCatalogue(result.games);
+        })
+        .catch((requestError) => {
+          if (!stopped) setError(requestError.message);
+        })
+        .finally(() => {
+          if (!stopped) setCatalogueLoading(false);
+        });
+      return () => {
+        stopped = true;
+      };
     }
 
     let stopped = false;
@@ -1561,16 +1578,22 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
             locked_kobo: latest.locked_kobo,
           }));
           setError("");
-          const currentRoundId = latest.active_round?.id ?? null;
-          if (currentRoundId !== draftRoundId.current) {
-            draftRoundId.current = currentRoundId;
-            setOutcomeKey(latest.active_round?.my_bet?.outcome_key || "");
-            setStake(
-              latest.active_round?.my_bet
-                ? (latest.active_round.my_bet.stake_kobo / 100).toFixed(2)
+          const rounds = latest.active_rounds
+            || (latest.active_round ? [latest.active_round] : []);
+          setOutcomes((current) => Object.fromEntries(rounds.map((round) => [
+            round.id,
+            Object.prototype.hasOwnProperty.call(current, round.id)
+              ? current[round.id]
+              : round.my_bet?.outcome_key || "",
+          ])));
+          setStakes((current) => Object.fromEntries(rounds.map((round) => [
+            round.id,
+            Object.prototype.hasOwnProperty.call(current, round.id)
+              ? current[round.id]
+              : round.my_bet
+                ? (round.my_bet.stake_kobo / 100).toFixed(2)
                 : "10",
-            );
-          }
+          ])));
         }
       } catch (requestError) {
         if (!stopped) setError(requestError.message);
@@ -1588,6 +1611,25 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
       .catch((requestError) => {
         if (!stopped) setError(requestError.message);
       });
+    const paymentParams = new URLSearchParams(window.location.search);
+    const paymentReference = paymentParams.get("reference");
+    if (paymentParams.get("payment") === "wallet" && paymentReference) {
+      window.history.replaceState({}, "", `${window.location.pathname}#predictions`);
+      setMessage("Confirming your Paystack payment...");
+      api.verifyWalletDeposit(session.token, paymentReference)
+        .then(async (result) => {
+          if (stopped) return;
+          setMessage(result.status === "success"
+            ? `Wallet funded with ${formatNaira(result.amount_kobo)}.`
+            : `Payment status: ${result.status}.`);
+          await refresh(true);
+          const latestWallet = await api.getWallet(session.token);
+          if (!stopped) setWallet(latestWallet);
+        })
+        .catch((requestError) => {
+          if (!stopped) setError(requestError.message);
+        });
+    }
     const refreshTimer = window.setInterval(() => void refresh(true), 5000);
     const clockTimer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => {
@@ -1598,12 +1640,17 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
   }, [session?.token]);
 
   async function saveBet(round) {
-    const stakeKobo = nairaToKobo(stake);
+    const outcomeKey = outcomes[round.id];
+    const stakeKobo = round.is_demo ? 0 : nairaToKobo(stakes[round.id]);
     if (!outcomeKey) {
       setError("Choose an outcome before placing your prediction.");
       return;
     }
-    if (!Number.isInteger(stakeKobo) || stakeKobo < 100 || stakeKobo > data.available_kobo) {
+    if (!round.is_demo && (
+      !Number.isInteger(stakeKobo)
+      || stakeKobo < 100
+      || stakeKobo > data.available_kobo
+    )) {
       setError("Enter a stake of at least NGN 1.00 within your available balance.");
       return;
     }
@@ -1615,7 +1662,9 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
         outcome_key: outcomeKey,
         stake_kobo: stakeKobo,
       });
-      setMessage("Your prediction is saved. It will lock when the timer ends.");
+      setMessage(round.is_demo
+        ? "Your demo pick is saved. It has no cash stake or payout."
+        : "Your prediction is saved. It will lock when the timer ends.");
       const [latest, latestWallet] = await Promise.all([
         api.getVirtualGames(session.token),
         api.getWallet(session.token),
@@ -1626,6 +1675,32 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
       setError(requestError.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitFunding(event) {
+    event.preventDefault();
+    const amountKobo = nairaToKobo(funding.amount);
+    if (!Number.isInteger(amountKobo) || amountKobo < 10000 || amountKobo > 50_000_000) {
+      setError("Enter an amount between NGN 100.00 and NGN 500,000.00.");
+      return;
+    }
+    setFundingPending(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await api.initializeWalletDeposit(session.token, {
+        amount_kobo: amountKobo,
+        email: funding.email.trim(),
+        request_key: createRequestKey(),
+      });
+      if (!result.authorization_url) {
+        throw new Error("Paystack did not provide a checkout link. Please try again.");
+      }
+      window.location.assign(result.authorization_url);
+    } catch (requestError) {
+      setError(requestError.message);
+      setFundingPending(false);
     }
   }
 
@@ -1680,10 +1755,9 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
   }
 
   const gameNames = Object.fromEntries(games.map((game) => [game.id, game.name]));
-  const round = data?.active_round;
-  const secondsRemaining = round
-    ? Math.max(0, Math.ceil((new Date(round.closes_at).getTime() - clock) / 1000))
-    : 0;
+  const virtualCatalogue = catalogue;
+  const rounds = data?.active_rounds
+    || (data?.active_round ? [data.active_round] : []);
 
   return (
     <section className="predictions-section" id="predictions">
@@ -1695,10 +1769,43 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
         <p className="section-note">Completed AusPlay matches, replayed as a timed simulation.</p>
       </div>
       {!session ? (
-        <div className="card prediction-empty">
-          <p>Sign in to view your NGN wallet and play eligible historical prediction rounds.</p>
-          <ActionButton className="btn" onClick={onLogin}>Log in or sign up</ActionButton>
-        </div>
+        <>
+          <div className="card prediction-empty">
+            <p>Browse the virtual game catalogue below. Sign in to view a round, place predictions, and fund your wallet.</p>
+            <ActionButton className="btn" onClick={onLogin}>Log in or sign up</ActionButton>
+          </div>
+          {error && <p className="error prediction-feedback" role="alert">{error}</p>}
+          {catalogueLoading && !virtualCatalogue.length && (
+            <p className="login-prompt" role="status">Loading virtual game catalogue...</p>
+          )}
+          {virtualCatalogue.length > 0 && <div className="virtual-game-catalogue">
+            {virtualCatalogue.map((game) => (
+              <article className="card virtual-game-tile" key={game.game_id}>
+                <img
+                  src={GAME_ARTWORK[game.game_id]}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />
+                <div>
+                  <h3>{game.name}</h3>
+                  <span className={game.demo_only ? "demo-label" : "historical-label"}>
+                    {game.demo_only ? "Demo only · no money stakes" : "Historical rounds available"}
+                  </span>
+                  <p>{game.completed_matches} completed AusPlay matches recorded</p>
+                  <small>
+                    {game.demo_only
+                      ? "Money predictions unlock after 10 completed matches for a game and player count."
+                      : `Eligible player counts: ${game.eligible_player_counts.join(", ")}.`}
+                  </small>
+                </div>
+              </article>
+            ))}
+          </div>}
+          {!catalogueLoading && !error && !virtualCatalogue.length && (
+            <p className="empty-state">There are no virtual games in the catalogue yet.</p>
+          )}
+        </>
       ) : (
         <>
           <div className="prediction-summary">
@@ -1711,6 +1818,9 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
               <strong>{formatNaira(wallet?.locked_kobo)}</strong>
             </div>
             <p>NGN funds are held in a platform wallet. Predictions require at least 10 completed matches for the same game and player count.</p>
+            <ActionButton className="btn" onClick={() => setFundingOpen((open) => !open)}>
+              Fund wallet
+            </ActionButton>
             <ActionButton className="btn" onClick={openWithdrawalForm}>
               Withdraw to bank
             </ActionButton>
@@ -1733,6 +1843,43 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
               Refresh
             </ActionButton>
           </div>
+          {fundingOpen && (
+            <form className="card wallet-funding-form" onSubmit={submitFunding}>
+              <h3>Fund your AusPlay wallet</h3>
+              <p>Pay securely with Paystack. Your wallet is credited after Paystack confirms payment.</p>
+              <label>
+                Amount (NGN)
+                <input
+                  type="number"
+                  min="100"
+                  max="500000"
+                  step="0.01"
+                  required
+                  value={funding.amount}
+                  onChange={(event) => setFunding({ ...funding, amount: event.target.value })}
+                />
+              </label>
+              <label>
+                Email for Paystack receipt
+                <input
+                  type="email"
+                  autoComplete="email"
+                  maxLength="254"
+                  required
+                  value={funding.email}
+                  onChange={(event) => setFunding({ ...funding, email: event.target.value })}
+                />
+              </label>
+              <div className="queue-actions">
+                <ActionButton className="btn" type="submit" loading={fundingPending}>
+                  Continue to Paystack
+                </ActionButton>
+                <ActionButton className="link" onClick={() => setFundingOpen(false)}>
+                  Cancel
+                </ActionButton>
+              </div>
+            </form>
+          )}
           {withdrawalOpen && (
             <form className="card wallet-withdrawal-form" onSubmit={submitWithdrawal}>
               <h3>Withdraw to a Nigerian bank</h3>
@@ -1810,12 +1957,38 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
               </div>
             </div>
           )}
+          {wallet?.deposits?.length > 0 && (
+            <div className="prediction-history">
+              <h3>Recent wallet funding</h3>
+              <div className="prediction-history-list">
+                {wallet.deposits.map((deposit) => (
+                  <article className="prediction-history-item" key={deposit.reference}>
+                    <div>
+                      <strong>{formatNaira(deposit.amount_kobo)} · {deposit.status}</strong>
+                      <span>{deposit.reference}</span>
+                      {deposit.status_detail && <span>{deposit.status_detail}</span>}
+                    </div>
+                    <span>{new Date(deposit.created_at).toLocaleString()}</span>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
           {error && <p className="error prediction-feedback" role="alert">{error}</p>}
           {message && <p className="success prediction-feedback" role="status">{message}</p>}
           {loading && !data ? (
             <p className="login-prompt" role="status">Loading virtual game...</p>
-          ) : round ? (
-            <article className="card prediction-card">
+          ) : rounds.length ? (
+            <div className="virtual-round-grid">
+              {rounds.map((round) => {
+                const outcomeKey = outcomes[round.id] || "";
+                const stake = stakes[round.id] || "10";
+                const secondsRemaining = Math.max(
+                  0,
+                  Math.ceil((new Date(round.closes_at).getTime() - clock) / 1000),
+                );
+                return (
+            <article className="card prediction-card" key={round.id}>
               <div className="prediction-card-heading">
                 <div>
                   <span className="prediction-game">
@@ -1839,31 +2012,29 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
               <fieldset>
                 <legend>{round.is_demo ? "Sample outcomes" : "Choose an outcome"}</legend>
                 {round.options.map((option) => (
-                  round.is_demo ? (
-                    <div className="prediction-option" key={option.key}>
-                      <span>{option.label}</span>
-                      <strong>Demo</strong>
-                    </div>
-                  ) : (
-                    <label
-                      className={`prediction-option${outcomeKey === option.key ? " selected" : ""}`}
-                      key={option.key}
-                    >
-                      <input
-                        type="radio"
-                        name={`virtual-round-${round.id}`}
-                        value={option.key}
-                        checked={outcomeKey === option.key}
-                        onChange={() => setOutcomeKey(option.key)}
-                      />
-                      <span>{option.label}</span>
-                      <strong>
-                        {option.historical_odds_milli
+                  <label
+                    className={`prediction-option${outcomeKey === option.key ? " selected" : ""}`}
+                    key={option.key}
+                  >
+                    <input
+                      type="radio"
+                      name={`virtual-round-${round.id}`}
+                      value={option.key}
+                      checked={outcomeKey === option.key}
+                      onChange={() => setOutcomes((current) => ({
+                        ...current,
+                        [round.id]: option.key,
+                      }))}
+                    />
+                    <span>{option.label}</span>
+                    <strong>
+                      {round.is_demo
+                        ? "Demo pick"
+                        : option.historical_odds_milli
                           ? `${(100000 / option.historical_odds_milli).toFixed(1)}% historical`
                           : "No history"}
-                      </strong>
-                    </label>
-                  )
+                    </strong>
+                  </label>
                 ))}
               </fieldset>
               {!round.is_demo && (
@@ -1876,23 +2047,31 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
                       max={(data.available_kobo + (round.my_bet?.stake_kobo || 0)) / 100}
                       step="0.01"
                       value={stake}
-                      onChange={(event) => setStake(event.target.value)}
+                      onChange={(event) => setStakes((current) => ({
+                        ...current,
+                        [round.id]: event.target.value,
+                      }))}
                     />
                   </label>
                   <p className="prediction-lock-note">
                     Winners share the losing stakes proportionally. The platform retains 10% of losing stakes; returns are pooled and are not fixed odds.
                   </p>
-                  <ActionButton
-                    className="btn prediction-submit"
-                    onClick={() => saveBet(round)}
-                    disabled={saving || secondsRemaining === 0 || !outcomeKey}
-                    loading={saving}
-                  >
-                    {round.my_bet ? "Update prediction" : "Place prediction"}
-                  </ActionButton>
                 </>
               )}
+              <ActionButton
+                className="btn prediction-submit"
+                onClick={() => saveBet(round)}
+                disabled={saving || secondsRemaining === 0 || !outcomeKey}
+                loading={saving}
+              >
+                {round.is_demo
+                  ? round.my_bet ? "Update demo pick" : "Make demo pick"
+                  : round.my_bet ? "Update prediction" : "Place prediction"}
+              </ActionButton>
             </article>
+                );
+              })}
+            </div>
           ) : data && !error ? (
             <p className="empty-state">
               No unused completed matches are available for a virtual round yet.
@@ -1912,8 +2091,13 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
                     <div className={`prediction-result ${bet.status}`}>
                       <span>{bet.status === "pending"
                         ? "Awaiting reveal"
-                        : bet.status === "won" ? "Won" : bet.status === "refunded" ? "Refunded" : "Not this time"}</span>
-                      {bet.status !== "pending" && (
+                        : bet.status === "demo_correct" ? "Demo pick correct"
+                          : bet.status === "demo_missed" ? "Demo pick missed"
+                            : bet.status === "won" ? "Won"
+                              : bet.status === "refunded" ? "Refunded" : "Not this time"}</span>
+                      {bet.is_demo ? (
+                        <strong>No money involved</strong>
+                      ) : bet.status !== "pending" && (
                         <strong>{bet.status === "won"
                           ? `+${formatNaira(bet.payout_kobo - bet.stake_kobo)}`
                           : bet.status === "refunded"
