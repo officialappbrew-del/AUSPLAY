@@ -9,6 +9,7 @@ import {
 } from "./soloDraughts";
 import { findDirectionalTarget, getGamepadDirection } from "./gamepadNavigation";
 import { mergeGameCatalogue } from "./gameCatalogue";
+import { filterRooms, getRoomAvailability, uniqueRooms } from "./roomDiscovery";
 
 const GAME_ARTWORK = {
   chess: "/game-art/chess.svg",
@@ -564,6 +565,7 @@ function PracticeRoomChat({ token, roomId, username }) {
 function HostWorkspace({
   session,
   application,
+  applicationLoading,
   onApplicationChange,
   onRoleChange,
   onNotice,
@@ -620,13 +622,17 @@ function HostWorkspace({
 
   return (
     <section className="workflow-section" aria-label="Host access and rule studio">
-      {session.role === "host" ? (
+      {session.role !== "host" && applicationLoading ? (
+        <div className="card workflow-card">
+          <p role="status">Loading your Host application status...</p>
+        </div>
+      ) : session.role === "host" ? (
         <div className="card workflow-card">
           <p className="eyebrow">HOST WORKSPACE</p>
           <h2>Rulebook studio</h2>
           <p className="practice-note">
-            Hosts can propose rulebook text for review. Approval updates the published
-            description only; match mechanics remain server-enforced.
+            Community Hosts can propose rulebook text for administrator review. Approved text
+            updates published instructions only; game mechanics remain server-enforced.
           </p>
           <form className="workflow-form" onSubmit={proposeRulebook}>
             <label>
@@ -670,7 +676,11 @@ function HostWorkspace({
       ) : (
         <div className="card workflow-card">
           <p className="eyebrow">COMMUNITY HOSTS</p>
-          <h2>Apply for Host access</h2>
+          <h2>Become an AusPlay Community Host</h2>
+          <p className="host-intro">
+            Signed-in players can apply. Hosts can propose game-rule updates for administrator
+            review; approval does not change how games are enforced.
+          </p>
           {application?.status === "pending" ? (
             <>
               <p role="status">Your application is awaiting administrator review.</p>
@@ -1318,6 +1328,29 @@ function GameActionIcon({ action }) {
           <path d="M20 4v5h-5" />
         </>
       )}
+    </svg>
+  );
+}
+
+function NavigationIcon({ name }) {
+  const paths = {
+    home: <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V10Z" />,
+    games: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
+    play: <path d="M8 5.5v13l10-6.5-10-6.5Z" />,
+    profile: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
+  };
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {paths[name]}
     </svg>
   );
 }
@@ -2584,9 +2617,9 @@ function SoloGame({ token, gameId, username, rulebook, onClose }) {
   );
 }
 
-function PlayerProfile({ token }) {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+function PlayerProfile({ token, initialProfile, initialProfileLoading, onProfileChange }) {
+  const [profile, setProfile] = useState(initialProfile || null);
+  const [loading, setLoading] = useState(!initialProfile);
   const [error, setError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [displayName, setDisplayName] = useState("");
@@ -2601,6 +2634,20 @@ function PlayerProfile({ token }) {
 
   useEffect(() => {
     let stopped = false;
+    if (initialProfile) {
+      setProfile(initialProfile);
+      setLoading(false);
+      setError("");
+      return () => {
+        stopped = true;
+      };
+    }
+    if (initialProfileLoading) {
+      setLoading(true);
+      return () => {
+        stopped = true;
+      };
+    }
     setLoading(true);
     setError("");
     api.getPlayerProfile(token)
@@ -2616,7 +2663,7 @@ function PlayerProfile({ token }) {
     return () => {
       stopped = true;
     };
-  }, [token, loadAttempt]);
+  }, [token, loadAttempt, initialProfile, initialProfileLoading]);
 
   useEffect(() => {
     if (!profile) return;
@@ -2634,6 +2681,10 @@ function PlayerProfile({ token }) {
         ...current,
         user: { ...current.user, ...updated },
       }));
+      onProfileChange?.({
+        ...profile,
+        user: { ...profile.user, ...updated },
+      });
       setProfileMessage(
         updated.email && !updated.email_verified
           ? "Profile saved. Check your email to verify it for account recovery."
@@ -2822,6 +2873,23 @@ const INITIAL_GAMES = [
   { id: "snooker", name: "Snooker", players: "2", playable: true },
   { id: "whot", name: "Whot", players: "2-4", playable: true },
 ];
+
+const GAME_DESCRIPTIONS = {
+  chess: "Plan ahead in a classic strategy match.",
+  draughts: "Capture pieces and crown your kings.",
+  golf: "Compete across a friendly nine-hole scorecard.",
+  ludo: "Race your tokens home with fair server-rolled dice.",
+  polo: "Track team goals across four chukkas.",
+  snooker: "Play best-of-three frames on the scorecard.",
+  whot: "Match suits, play action cards, and empty your hand.",
+};
+
+const ROOM_AVAILABILITY_LABELS = {
+  waiting: "Waiting for players",
+  full: "Full",
+  "in-progress": "In progress",
+  completed: "Completed",
+};
 
 function PublicPlayerProfile({ username }) {
   const [profile, setProfile] = useState(null);
@@ -3014,18 +3082,29 @@ function HomeApp() {
   ); // "signup" | "login" | null
   const [pendingPlayChoice, setPendingPlayChoice] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profileSummary, setProfileSummary] = useState(null);
+  const [profileSummaryLoading, setProfileSummaryLoading] = useState(false);
+  const [profileSummaryError, setProfileSummaryError] = useState("");
   const [games, setGames] = useState(INITIAL_GAMES);
   const [rulebooks, setRulebooks] = useState({});
   const [rooms, setRooms] = useState([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
+  const [roomsError, setRoomsError] = useState("");
+  const [roomSearch, setRoomSearch] = useState("");
+  const [roomAvailabilityFilter, setRoomAvailabilityFilter] = useState("all");
+  const [roomGameFilter, setRoomGameFilter] = useState("all");
   const [hostApplication, setHostApplication] = useState(null);
+  const [hostApplicationLoading, setHostApplicationLoading] = useState(false);
   const [breakReminderMinutes, setBreakReminderMinutes] = useState(60);
   const [activeSeconds, setActiveSeconds] = useState(0);
   const [nextReminderSeconds, setNextReminderSeconds] = useState(60 * 60);
   const [activeGame, setActiveGame] = useState(null);
+  const [gameConnectionStatus, setGameConnectionStatus] = useState("offline");
   const [confirmQuitGame, setConfirmQuitGame] = useState(false);
   const [soloGameOpen, setSoloGameOpen] = useState(false);
   const [soloGameId, setSoloGameId] = useState("draughts");
   const [startSoloAfterAuth, setStartSoloAfterAuth] = useState(false);
+  const [startRoomsAfterAuth, setStartRoomsAfterAuth] = useState(false);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [draughtsBoardRotated, setDraughtsBoardRotated] = useState(false);
   const [notice, setNotice] = useState("");
@@ -3039,6 +3118,9 @@ function HomeApp() {
   const [reportRoomId, setReportRoomId] = useState(null);
   const [gameActionPending, setGameActionPending] = useState(false);
   const [pendingSquare, setPendingSquare] = useState(null);
+  const roomsRequestId = useRef(0);
+  const profileRequestId = useRef(0);
+  const loadedResults = useRef("");
   const waitingRoomKey = session && !activeGame
     ? rooms
       .filter((room) => room.viewer_is_seated && room.game_status === "not_started")
@@ -3075,6 +3157,7 @@ function HomeApp() {
     setPendingPlayChoice(null);
     if (!session) {
       if (pendingPlayChoice.kind === "solo") setStartSoloAfterAuth(true);
+      if (pendingPlayChoice.kind === "others") setStartRoomsAfterAuth(true);
       setMode("signup");
     } else if (pendingPlayChoice.kind === "solo") {
       setSoloGameId(pendingPlayChoice.gameId);
@@ -3092,17 +3175,78 @@ function HomeApp() {
     api.getRulebooks().then(setRulebooks).catch((err) => setNotice(err.message));
   }, []);
   useEffect(() => {
-    api.getRooms(session?.token).then(setRooms).catch((err) => setNotice(err.message));
-  }, [session]);
+    reloadRooms().catch(() => {});
+  }, [session?.token]);
   useEffect(() => {
+    if (!session) {
+      setProfileSummary(null);
+      setProfileSummaryError("");
+      setProfileSummaryLoading(false);
+      return undefined;
+    }
+    let stopped = false;
+    const requestId = ++profileRequestId.current;
+    setProfileSummaryLoading(true);
+    setProfileSummaryError("");
+    api.getPlayerProfile(session.token)
+      .then((profile) => {
+        if (!stopped && requestId === profileRequestId.current) setProfileSummary(profile);
+      })
+      .catch((err) => {
+        if (!stopped && requestId === profileRequestId.current) {
+          setProfileSummaryError(err.message);
+        }
+      })
+      .finally(() => {
+        if (!stopped && requestId === profileRequestId.current) {
+          setProfileSummaryLoading(false);
+        }
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [session?.token, session?.username]);
+  useEffect(() => {
+    const resultKey = activeGame?.status === "finished" && session
+      ? `${activeGame.room_id}:${activeGame.state.status}`
+      : "";
+    if (!resultKey || loadedResults.current === resultKey) return;
+    loadedResults.current = resultKey;
+    let stopped = false;
+    const requestId = ++profileRequestId.current;
+    api.getPlayerProfile(session.token)
+      .then((profile) => {
+        if (!stopped && requestId === profileRequestId.current) setProfileSummary(profile);
+      })
+      .catch((err) => {
+        if (!stopped && requestId === profileRequestId.current) setProfileSummaryError(err.message);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [activeGame?.room_id, activeGame?.status, activeGame?.state?.status, session?.token, session?.username]);
+  useEffect(() => {
+    let stopped = false;
     if (session) {
+      setHostApplicationLoading(true);
       api.getMyHostApplication(session.token)
-        .then(setHostApplication)
-        .catch((err) => setNotice(err.message));
+        .then((application) => {
+          if (!stopped) setHostApplication(application);
+        })
+        .catch((err) => {
+          if (!stopped) setNotice(`Could not load Host application status: ${err.message}`);
+        })
+        .finally(() => {
+          if (!stopped) setHostApplicationLoading(false);
+        });
     } else {
       setHostApplication(null);
+      setHostApplicationLoading(false);
       setActiveGame(null);
     }
+    return () => {
+      stopped = true;
+    };
   }, [session]);
   useEffect(() => {
     let stopped = false;
@@ -3161,6 +3305,7 @@ function HomeApp() {
     let reconnectTimer;
     let socket;
     const roomId = activeGame.room_id;
+    setGameConnectionStatus("connecting");
     const refresh = async () => {
       try {
         const latest = await api.getPracticeGame(session.token, roomId);
@@ -3179,6 +3324,7 @@ function HomeApp() {
       try {
         connection = api.connectRoomUpdates(session.token, roomId);
       } catch (err) {
+        setGameConnectionStatus("reconnecting");
         setNotice(`Live updates unavailable: ${err.message}`);
         scheduleReconnect();
         return;
@@ -3194,6 +3340,7 @@ function HomeApp() {
         }
         if (update.type === "connected") {
           connected = true;
+          setGameConnectionStatus("connected");
           reconnectDelay = 500;
           void refresh();
         } else if (update.type === "game_updated") {
@@ -3202,6 +3349,7 @@ function HomeApp() {
       });
       connection.addEventListener("close", () => {
         connected = false;
+        if (!stopped) setGameConnectionStatus("reconnecting");
         scheduleReconnect();
       });
       connection.addEventListener("error", () => connection.close());
@@ -3231,7 +3379,7 @@ function HomeApp() {
       try {
         const latestRooms = await api.getRooms(session.token);
         if (stopped) return;
-        setRooms(latestRooms);
+        setRooms(uniqueRooms(latestRooms));
         const startedRoom = latestRooms.find(
           (room) => roomIds.includes(room.id) && room.game_status !== "not_started",
         );
@@ -3301,7 +3449,18 @@ function HomeApp() {
   }, [session, activeGame?.room_id, waitingRoomKey]);
 
   async function reloadRooms() {
-    setRooms(await api.getRooms(session?.token));
+    const requestId = ++roomsRequestId.current;
+    setRoomsLoading(true);
+    setRoomsError("");
+    try {
+      const latestRooms = await api.getRooms(session?.token);
+      if (requestId === roomsRequestId.current) setRooms(uniqueRooms(latestRooms));
+    } catch (error) {
+      if (requestId === roomsRequestId.current) setRoomsError(error.message);
+      throw error;
+    } finally {
+      if (requestId === roomsRequestId.current) setRoomsLoading(false);
+    }
   }
 
   async function openGame(room) {
@@ -3506,16 +3665,31 @@ function HomeApp() {
   }
 
   const playerOptions = ["draughts", "chess", "polo", "snooker"].includes(gameId) ? [2] : [2, 3, 4];
-  const displayedRooms = selectedGameFilter
-    ? rooms.filter((room) => room.game_id === selectedGameFilter)
-    : rooms;
   const selectedGame = games.find((game) => game.id === selectedGameFilter);
+  const filteredRooms = filterRooms(rooms, {
+    search: roomSearch,
+    gameId: roomGameFilter,
+    availability: roomAvailabilityFilter,
+  });
   const sortedGames = [...games].sort((first, second) =>
     first.name.localeCompare(second.name, undefined, { sensitivity: "base" }),
   );
   const activeGameName = activeGame
     ? games.find((game) => game.id === activeGame.game_id)?.name || activeGame.game_id
     : "";
+
+  function scrollToSection(sectionId) {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function openProfile() {
+    if (!session) {
+      setMode("login");
+      return;
+    }
+    setProfileOpen(true);
+    window.setTimeout(() => scrollToSection("player-profile"), 0);
+  }
 
   function selectGame(game) {
     if (!game.playable) {
@@ -3525,6 +3699,7 @@ function HomeApp() {
     setGameId(game.id);
     setMaxPlayers(2);
     setSelectedGameFilter(game.id);
+    setRoomGameFilter(game.id);
     setShowSelectedGameOptions(true);
     setNotice(
       session
@@ -3543,10 +3718,11 @@ function HomeApp() {
       return;
     }
     if (!session) {
+      setStartRoomsAfterAuth(true);
       setMode("signup");
       return;
     }
-    document.getElementById("practice-rooms")?.scrollIntoView({ behavior: "smooth" });
+    scrollToSection("practice-rooms");
   }
 
   function openSoloGame(selectedGameId) {
@@ -3584,6 +3760,7 @@ function HomeApp() {
       return;
     }
     setSession(null);
+    setProfileSummary(null);
     setProfileOpen(false);
     setNotice("");
     setActiveGame(null);
@@ -3591,22 +3768,36 @@ function HomeApp() {
     setStartSoloAfterAuth(false);
   }
 
+  const profileDisplayName = profileSummary?.user.display_name || session?.display_name || session?.username || "";
+  const profileInitials = profileDisplayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+
   return (
-    <div className={`page${showSelectedGameOptions && selectedGame ? " has-mobile-game-options" : ""}${activeGame || soloGameOpen ? " game-focus" : ""}`}>
+    <div id="home" className={`page${showSelectedGameOptions && selectedGame ? " has-mobile-game-options" : ""}${activeGame || soloGameOpen ? " game-focus" : ""}`}>
       <ControllerNavigation />
-      <nav>
+      <nav className="site-nav">
         <span className="logo">Aus<b>Play</b></span>
+        <div className="primary-nav" aria-label="Main navigation">
+          <a className="nav-anchor" href="#home">Home</a>
+          <a className="nav-anchor" href="#games">Games</a>
+          <a className="nav-anchor" href="#practice-rooms">Practice Rooms</a>
+        </div>
         <div className="nav-links">
           {session ? (
             <>
               <ActionButton
-                className="link username-link"
+                className="profile-menu-button"
                 aria-expanded={profileOpen}
                 aria-controls="player-profile"
                 aria-label={`View ${session.username}'s profile and game history`}
-                onClick={() => setProfileOpen((open) => !open)}
+                onClick={openProfile}
               >
-                {session.username}
+                <span className="avatar avatar-small" aria-hidden="true">{profileInitials || "A"}</span>
+                <span>{profileDisplayName}</span>
               </ActionButton>
               <ActionButton className="link" onClick={logOut}>
                 Log out
@@ -3619,6 +3810,24 @@ function HomeApp() {
             </>
           )}
         </div>
+      </nav>
+      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+        <a href="#home" aria-label="Home">
+          <NavigationIcon name="home" />
+          <small>Home</small>
+        </a>
+        <a href="#games" aria-label="Games">
+          <NavigationIcon name="games" />
+          <small>Games</small>
+        </a>
+        <button type="button" onClick={playSelectedGameWithOthers} aria-label="Play">
+          <NavigationIcon name="play" />
+          <small>Play</small>
+        </button>
+        <button type="button" onClick={openProfile} aria-label="Profile">
+          <NavigationIcon name="profile" />
+          <small>Profile</small>
+        </button>
       </nav>
 
       {mode && !session ? (
@@ -3636,19 +3845,33 @@ function HomeApp() {
               setStartSoloAfterAuth(false);
               setSoloGameOpen(true);
             }
+            if (startRoomsAfterAuth) {
+              setStartRoomsAfterAuth(false);
+              window.setTimeout(() => scrollToSection("practice-rooms"), 0);
+            }
           }}
           onModeChange={setMode}
         />
       ) : (
         <header className="hero">
           <p className="eyebrow">PLAY FAIR. PLAY TOGETHER.</p>
-          <h1>Find your next<br />friendly challenge.</h1>
-          <p>Discover games, meet your players, and practise together.</p>
-          {!session && <ActionButton className="btn big" onClick={() => setMode("signup")}>Create free account</ActionButton>}
+          <h1>Your next match<br />starts here.</h1>
+          <p>Challenge friends, meet new players, and enjoy free practice games.</p>
+          <div className="hero-actions">
+            <ActionButton className="btn big" onClick={() => scrollToSection("games")}>
+              Play Now
+            </ActionButton>
+            <ActionButton className="btn-secondary" onClick={playSelectedGameWithOthers}>
+              Play with Friends
+            </ActionButton>
+            <ActionButton className="link hero-link" onClick={() => scrollToSection("practice-rooms")}>
+              Browse Practice Rooms
+            </ActionButton>
+          </div>
         </header>
       )}
 
-      <section className="games-section">
+      <section className="games-section" id="games">
         <div className="section-heading">
           <div>
             <p className="eyebrow">CHOOSE YOUR GAME</p>
@@ -3658,19 +3881,10 @@ function HomeApp() {
         </div>
         <div className="grid">
           {sortedGames.map((g) => (
-            <div
+            <article
               className={`card game-card${g.playable ? " selectable" : ""}${selectedGameFilter === g.id ? " selected" : ""}`}
               key={g.id}
-              role={g.playable ? "button" : undefined}
-              tabIndex={g.playable ? 0 : undefined}
-              aria-pressed={g.playable ? selectedGameFilter === g.id : undefined}
-              onClick={g.playable ? () => selectGame(g) : undefined}
-              onKeyDown={g.playable ? (event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  selectGame(g);
-                }
-              } : undefined}
+              aria-label={`${g.name}${g.playable ? `, ${g.players} players` : ", coming soon"}`}
             >
               <div className="game-card-art" aria-hidden="true">
                 {GAME_ARTWORK[g.id] ? (
@@ -3682,11 +3896,21 @@ function HomeApp() {
               <span className={`game-availability ${g.playable ? "ready" : ""}`}>
                 {g.playable ? "Playable now" : "Coming soon"}
               </span>
-              <h3>{g.name}</h3>
-              <p>
-                {g.description || (g.players === "TBD" ? "Player count to be announced" : `${g.players} players`)}
-              </p>
-            </div>
+              <div className="game-card-copy">
+                <h3>{g.name}</h3>
+                <span className="game-player-count">
+                  {g.playable ? `${g.players} players` : "Not playable yet"}
+                </span>
+                <p>{g.description || GAME_DESCRIPTIONS[g.id] || "Explore this practice game."}</p>
+              </div>
+              <ActionButton
+                className={g.playable ? "game-card-action" : "game-card-action unavailable"}
+                onClick={g.playable ? () => selectGame(g) : undefined}
+                disabled={!g.playable}
+              >
+                {g.playable ? "Play" : "Coming soon"}
+              </ActionButton>
+            </article>
           ))}
         </div>
         {selectedGame && showSelectedGameOptions && (
@@ -3706,6 +3930,85 @@ function HomeApp() {
           </div>
         )}
       </section>
+
+      {session && (
+        <section className="dashboard-section" aria-label="Player progress">
+          {profileSummaryLoading && !profileSummary ? (
+            <p className="login-prompt" role="status">Loading your player summary...</p>
+          ) : profileSummaryError && !profileSummary ? (
+            <div className="dashboard-error">
+              <p role="alert">Could not load your match summary: {profileSummaryError}</p>
+              <ActionButton className="link" onClick={() => {
+                setProfileSummaryError("");
+                setProfileSummaryLoading(true);
+                api.getPlayerProfile(session.token)
+                  .then(setProfileSummary)
+                  .catch((error) => setProfileSummaryError(error.message))
+                  .finally(() => setProfileSummaryLoading(false));
+              }}>
+                Retry
+              </ActionButton>
+            </div>
+          ) : profileSummary ? (
+            <div className="dashboard-panel">
+              <div className="dashboard-heading">
+                <div className="dashboard-player">
+                  <span className="avatar" aria-hidden="true">{profileInitials || "A"}</span>
+                  <div>
+                    <p className="eyebrow">YOUR PROGRESS</p>
+                    <h2>Welcome back, {profileDisplayName}</h2>
+                  </div>
+                </div>
+                <ActionButton className="link" onClick={openProfile}>View profile</ActionButton>
+              </div>
+              <div className="dashboard-stats">
+                {[
+                  ["Matches", profileSummary.stats.played],
+                  ["Wins", profileSummary.stats.wins],
+                  ["Draws", profileSummary.stats.draws],
+                  ["Losses", profileSummary.stats.losses],
+                  ["Win rate", `${profileSummary.stats.win_rate}%`],
+                ].map(([label, value]) => (
+                  <div className="dashboard-stat" key={label}>
+                    <strong>{value}</strong>
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+              {profileSummary.recent_matches.length > 0 && (
+                <div className="dashboard-recent">
+                  <div className="dashboard-recent-heading">
+                    <h3>Recently played</h3>
+                    <ActionButton className="link" onClick={openProfile}>All results</ActionButton>
+                  </div>
+                  <div className="recent-match-grid">
+                    {profileSummary.recent_matches.slice(0, 3).map((match) => (
+                      <article className="recent-match-card" key={match.room_id}>
+                        <div className="recent-match-art">
+                          <img
+                            src={GAME_ARTWORK[match.game_id]}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                          />
+                        </div>
+                        <div className="recent-match-info">
+                          <strong>{match.game_name}</strong>
+                          <span>{match.opponents.length ? match.opponents.join(", ") : "Practice match"}</span>
+                        </div>
+                        <span className={`profile-result ${match.result}`}>{match.result}</span>
+                        <time dateTime={match.completed_at}>
+                          {new Date(match.completed_at).toLocaleDateString()}
+                        </time>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </section>
+      )}
 
       {session && soloGameOpen && (
         soloGameId === "draughts" ? (
@@ -3729,7 +4032,14 @@ function HomeApp() {
 
       {notice && <p className="notice" role="status" aria-live="polite">{notice}</p>}
 
-      {session && profileOpen && <PlayerProfile token={session.token} />}
+      {session && profileOpen && (
+        <PlayerProfile
+          token={session.token}
+          initialProfile={profileSummary}
+          initialProfileLoading={profileSummaryLoading}
+          onProfileChange={setProfileSummary}
+        />
+      )}
 
       {session && (
         <ResponsiblePlaySettings
@@ -3759,6 +4069,7 @@ function HomeApp() {
         <HostWorkspace
           session={session}
           application={hostApplication}
+          applicationLoading={hostApplicationLoading}
           onApplicationChange={setHostApplication}
           onRoleChange={setSession}
           onNotice={setNotice}
@@ -3778,20 +4089,21 @@ function HomeApp() {
             <p className="eyebrow">PLAY WITH OTHERS</p>
             <h2>Practice rooms</h2>
           </div>
-          <div className="room-actions">
-            <p className="section-note">Join an open room or start one for your group.</p>
+          <div className="room-heading-actions">
+            <p className="section-note">Free practice, no stakes or prizes.</p>
             <ActionButton className="link" onClick={() => reloadRooms().catch((err) => setNotice(err.message))}>
-              Refresh rooms
+              {roomsLoading ? "Refreshing..." : "Refresh"}
             </ActionButton>
-            {selectedGameFilter && (
+            {roomGameFilter !== "all" && (
               <ActionButton
                 className="link"
                 onClick={() => {
                   setSelectedGameFilter(null);
+                  setRoomGameFilter("all");
                   setShowSelectedGameOptions(false);
                 }}
               >
-                Show all games
+                Clear game filter
               </ActionButton>
             )}
           </div>
@@ -3816,7 +4128,8 @@ function HomeApp() {
                 setGameId(e.target.value);
                 setMaxPlayers(2);
                 setSelectedGameFilter(e.target.value);
-                setShowSelectedGameOptions(true);
+                setRoomGameFilter(e.target.value);
+                setShowSelectedGameOptions(false);
               }}>
                 {games.filter((game) => game.playable).map((game) => (
                   <option key={game.id} value={game.id}>{game.name}</option>
@@ -3836,76 +4149,145 @@ function HomeApp() {
         ) : (
           <p className="login-prompt">Log in or sign up to create a practice room and join other players.</p>
         )}
-        {displayedRooms.length ? (
-          <div className="grid room-grid">
-            {displayedRooms.map((room) => (
-              <div className="card room-card" key={room.id}>
-                <div className="room-card-heading">
-                  <h3>{room.name}</h3>
-                  <span className={`room-status ${room.status}`}>{room.status}</span>
-                </div>
-                <p>
-                  {games.find((game) => game.id === room.game_id)?.name || room.game_id}
-                  {" · Hosted by "}
-                  <PlayerProfileLink username={room.host} />
-                </p>
-                <p>{room.players}/{room.max_players} players</p>
-                <p className="room-rules">
-                  <strong>{rulebooks[room.game_id]?.title || "Game rules"}</strong>
-                  {" · "}
-                  {rulebooks[room.game_id]?.content || "See the game rules."}
-                </p>
-                {session && room.viewer_is_seated && (
-                  room.game_status === "active" || room.game_status === "finished"
-                ) && (
-                  <ActionButton className="btn room-join" onClick={() => openGame(room)}>
-                    {room.game_status === "active" ? "Open game" : "View result"}
-                  </ActionButton>
-                )}
-                {session && room.status === "open" && !room.viewer_is_seated && (
-                  <ActionButton
-                    className="btn room-join"
-                    onClick={() => joinRoom(room)}
-                    disabled={busyRoom === room.id}
-                  >
-                    {busyRoom === room.id ? "Joining..." : "Join room"}
-                  </ActionButton>
-                )}
-                {session && room.status === "open" && room.viewer_is_seated && (
-                  <p className="room-unavailable">You're in - waiting for other players.</p>
-                )}
-                {room.game_status === "not_started" && room.status === "full" && (
-                  <p className="room-unavailable">This game is not playable yet.</p>
-                )}
-                {session && (
-                  <>
-                    <ActionButton
-                      className="link report-toggle"
-                      onClick={() => setReportRoomId(reportRoomId === room.id ? null : room.id)}
-                    >
-                      {reportRoomId === room.id ? "Cancel report" : "Report room"}
-                    </ActionButton>
-                    {reportRoomId === room.id && (
-                      <RoomReportForm
-                        token={session.token}
-                        roomId={room.id}
-                        onCancel={() => setReportRoomId(null)}
-                        onSubmitted={() => setReportRoomId(null)}
-                        onNotice={setNotice}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="empty-state">
-            {selectedGame
-              ? `No ${selectedGame.name} rooms yet. Create one above and invite your friends.`
-              : "No practice rooms yet. Start one and invite your friends."}
-          </p>
+        <div className="room-filters" role="group" aria-label="Filter practice rooms">
+          <label className="room-search">
+            Search rooms
+            <input
+              type="search"
+              value={roomSearch}
+              onChange={(event) => setRoomSearch(event.target.value)}
+              placeholder="Room name or host"
+            />
+          </label>
+          <label>
+            Game
+            <select
+              value={roomGameFilter}
+              onChange={(event) => {
+                setRoomGameFilter(event.target.value);
+                setSelectedGameFilter(event.target.value === "all" ? null : event.target.value);
+              }}
+            >
+              <option value="all">All games</option>
+              {games.filter((game) => game.playable).map((game) => (
+                <option key={game.id} value={game.id}>{game.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Availability
+            <select
+              value={roomAvailabilityFilter}
+              onChange={(event) => setRoomAvailabilityFilter(event.target.value)}
+            >
+              <option value="all">All rooms</option>
+              <option value="waiting">Waiting for players</option>
+              <option value="full">Full</option>
+              <option value="in-progress">In progress</option>
+              <option value="completed">Completed</option>
+            </select>
+          </label>
+        </div>
+        {roomsLoading && rooms.length === 0 && (
+          <p className="login-prompt" role="status">Loading practice rooms...</p>
         )}
+        {roomsError && (
+          <div className="rooms-error">
+            <p role="alert">Could not load practice rooms: {roomsError}</p>
+            <ActionButton className="link" onClick={() => reloadRooms().catch((err) => setNotice(err.message))}>
+              Try again
+            </ActionButton>
+          </div>
+        )}
+        {filteredRooms.length ? (
+          <div className="grid room-grid">
+            {filteredRooms.map((room) => {
+              const availability = getRoomAvailability(room);
+              const gameName = games.find((game) => game.id === room.game_id)?.name || room.game_id;
+              return (
+                <div className="card room-card" key={room.id}>
+                  <div className="room-card-heading">
+                    <h3>{room.name}</h3>
+                    <span className={`room-status ${availability}`}>
+                      {ROOM_AVAILABILITY_LABELS[availability]}
+                    </span>
+                  </div>
+                  <div className="room-meta">
+                    <span className="room-game-name">{gameName}</span>
+                    <span>Hosted by <PlayerProfileLink username={room.host} /></span>
+                  </div>
+                  <p className="room-capacity">
+                    <span aria-hidden="true">♟</span> {room.players} of {room.max_players} players
+                  </p>
+                  {rulebooks[room.game_id] && (
+                    <details className="room-rules">
+                      <summary>{rulebooks[room.game_id].title}</summary>
+                      <p>{rulebooks[room.game_id].content}</p>
+                    </details>
+                  )}
+                  {session && room.viewer_is_seated && (
+                    room.game_status === "active" || room.game_status === "finished"
+                  ) && (
+                    <ActionButton className="btn room-join" onClick={() => openGame(room)}>
+                      {room.game_status === "active" ? "Open Game" : "View Result"}
+                    </ActionButton>
+                  )}
+                  {session && availability === "waiting" && !room.viewer_is_seated && (
+                    <ActionButton
+                      className="btn room-join"
+                      onClick={() => joinRoom(room)}
+                      disabled={busyRoom === room.id}
+                    >
+                      {busyRoom === room.id ? "Joining..." : "Join Room"}
+                    </ActionButton>
+                  )}
+                  {session && room.viewer_is_seated && availability === "waiting" && (
+                    <p className="room-unavailable">You’re in. Waiting for more players.</p>
+                  )}
+                  {!session && availability === "waiting" && (
+                    <p className="room-unavailable">Log in to join this room.</p>
+                  )}
+                  {availability === "full" && (
+                    <p className="room-unavailable">This room is at capacity.</p>
+                  )}
+                  {availability === "in-progress" && !room.viewer_is_seated && (
+                    <p className="room-unavailable">This game is in progress; new players cannot join.</p>
+                  )}
+                  {availability === "completed" && !room.viewer_is_seated && (
+                    <p className="room-unavailable">Results are available to players in this room.</p>
+                  )}
+                  {session && (
+                    <>
+                      <ActionButton
+                        className="link report-toggle"
+                        onClick={() => setReportRoomId(reportRoomId === room.id ? null : room.id)}
+                      >
+                        {reportRoomId === room.id ? "Cancel report" : "Report room"}
+                      </ActionButton>
+                      {reportRoomId === room.id && (
+                        <RoomReportForm
+                          token={session.token}
+                          roomId={room.id}
+                          onCancel={() => setReportRoomId(null)}
+                          onSubmitted={() => setReportRoomId(null)}
+                          onNotice={setNotice}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : !roomsLoading && !roomsError ? (
+          <p className="empty-state">
+            {rooms.length
+              ? "No rooms match those filters. Try changing your search or availability."
+              : selectedGame
+                ? `No ${selectedGame.name} rooms yet. Create one above and invite your friends.`
+                : "No practice rooms yet. Start one and invite your friends."}
+          </p>
+        ) : null}
       </section>
 
       {activeGame && (
@@ -3916,6 +4298,14 @@ function HomeApp() {
           <div className="game-toolbar">
             <div>
               <h2>{activeGameName}</h2>
+              <p className={`game-connection ${gameConnectionStatus}`} role="status" aria-live="polite">
+                <span aria-hidden="true" />
+                {gameConnectionStatus === "connected"
+                  ? "Live updates connected"
+                  : gameConnectionStatus === "reconnecting"
+                    ? "Reconnecting to live updates"
+                    : "Connecting to live updates"}
+              </p>
             </div>
             <div className="room-actions">
               <GameHelpButton
