@@ -49,6 +49,14 @@ read-only, and deposits, real-money stakes, prizes, and payouts are intentionall
 launch markets, and compliance requirements with qualified local counsel before enabling any
 real-money features.
 
+The Virtual Games section replays outcomes from completed AusPlay matches in 60-second
+prediction rounds. Player labels are anonymous, and the stored result is revealed only after
+the round closes. Accounts receive 1,000 non-purchasable virtual credits; bets, balances, and
+payouts are kept separate from the money wallet. Credits cannot be bought, withdrawn, or
+redeemed and have no cash value. Decimal odds use add-one-smoothed outcome frequencies from
+completed matches of the same game and player count; payouts include the stake and are rounded
+down to whole credits. These are historical simulations, not live matches or financial betting.
+
 ## Host and moderation workflow
 Players can request Host access; an administrator must approve the request before the user can
 propose published rulebook text. Approved text changes the public rules description only—the

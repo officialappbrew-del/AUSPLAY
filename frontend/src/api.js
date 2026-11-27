@@ -81,19 +81,13 @@ export const saveResponsiblePlaySettings = (token, breakReminderMinutes) =>
 export const getRooms = (token) => request("/rooms", {}, token);
 export const createPracticeRoom = (token, room) =>
   request("/rooms", { method: "POST", body: JSON.stringify(room) }, token);
-export const joinPracticeRoom = (token, roomId, predictionOptIn = false) =>
-  request(
-    `/rooms/${roomId}/join${predictionOptIn ? "?prediction_opt_in=true" : ""}`,
-    { method: "POST" },
-    token,
-  );
-export const startPredictionRoom = (token, roomId) =>
-  request(`/rooms/${roomId}/start`, { method: "POST" }, token);
-export const getPredictions = (token) => request("/predictions", {}, token);
-export const submitPrediction = (token, roomId, prediction) =>
-  request(`/predictions/${roomId}`, {
+export const joinPracticeRoom = (token, roomId) =>
+  request(`/rooms/${roomId}/join`, { method: "POST" }, token);
+export const getVirtualGames = (token) => request("/virtual-games", {}, token);
+export const placeVirtualBet = (token, roundId, bet) =>
+  request(`/virtual-games/rounds/${roundId}/bets`, {
     method: "POST",
-    body: JSON.stringify(prediction),
+    body: JSON.stringify(bet),
   }, token);
 export const getPracticeGame = (token, roomId) =>
   request(`/rooms/${roomId}/game`, {}, token);

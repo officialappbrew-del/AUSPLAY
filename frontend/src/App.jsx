@@ -1356,19 +1356,23 @@ function NavigationIcon({ name }) {
   );
 }
 
-function PredictionWorkspace({ session, games, onLogin }) {
+function VirtualGamesWorkspace({ session, games, onLogin }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [selections, setSelections] = useState({});
-  const [savingRoom, setSavingRoom] = useState(null);
+  const [outcomeKey, setOutcomeKey] = useState("");
+  const [stake, setStake] = useState("50");
+  const [saving, setSaving] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+  const draftRoundId = useRef(null);
 
   useEffect(() => {
     if (!session) {
       setData(null);
       setLoading(false);
       setError("");
+      draftRoundId.current = null;
       return undefined;
     }
 
@@ -1379,20 +1383,16 @@ function PredictionWorkspace({ session, games, onLogin }) {
       refreshing = true;
       if (!silent) setLoading(true);
       try {
-        const latest = await api.getPredictions(session.token);
+        const latest = await api.getVirtualGames(session.token);
         if (!stopped) {
           setData(latest);
           setError("");
-          setSelections((current) => {
-            const next = { ...current };
-            latest.markets.forEach((market) => {
-              if (next[market.room_id] !== undefined || !market.my_prediction) return;
-              next[market.room_id] = market.my_prediction.predicts_draw
-                ? "draw"
-                : String(market.my_prediction.predicted_winner_user_id);
-            });
-            return next;
-          });
+          const currentRoundId = latest.active_round?.id ?? null;
+          if (currentRoundId !== draftRoundId.current) {
+            draftRoundId.current = currentRoundId;
+            setOutcomeKey(latest.active_round?.my_bet?.outcome_key || "");
+            setStake(String(latest.active_round?.my_bet?.stake || 50));
+          }
         }
       } catch (requestError) {
         if (!stopped) setError(requestError.message);
@@ -1403,76 +1403,78 @@ function PredictionWorkspace({ session, games, onLogin }) {
     };
 
     void refresh();
-    const refreshTimer = window.setInterval(() => void refresh(true), 15000);
+    const refreshTimer = window.setInterval(() => void refresh(true), 5000);
+    const clockTimer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => {
       stopped = true;
       window.clearInterval(refreshTimer);
+      window.clearInterval(clockTimer);
     };
   }, [session?.token]);
 
-  async function savePrediction(market) {
-    const selection = selections[market.room_id];
-    if (!selection) {
-      setError("Choose a player or a draw before saving your prediction.");
+  async function saveBet(round) {
+    const stakeAmount = Number(stake);
+    if (!outcomeKey) {
+      setError("Choose an outcome before placing your virtual bet.");
       return;
     }
-    setSavingRoom(market.room_id);
+    if (!Number.isInteger(stakeAmount) || stakeAmount < 1 || stakeAmount > data.balance) {
+      setError("Enter a whole-credit stake within your available balance.");
+      return;
+    }
+    setSaving(true);
     setError("");
     setMessage("");
     try {
-      const prediction = selection === "draw"
-        ? { predicts_draw: true, predicted_winner_user_id: null }
-        : { predicts_draw: false, predicted_winner_user_id: Number(selection) };
-      await api.submitPrediction(session.token, market.room_id, prediction);
-      setMessage(`Your prediction for "${market.room_name}" was saved.`);
-      setData((current) => current && ({
-        ...current,
-        markets: current.markets.map((currentMarket) => (
-          currentMarket.room_id === market.room_id
-            ? {
-              ...currentMarket,
-              my_prediction: prediction,
-              prediction_count: currentMarket.my_prediction
-                ? currentMarket.prediction_count
-                : currentMarket.prediction_count + 1,
-            }
-            : currentMarket
-        )),
-      }));
+      await api.placeVirtualBet(session.token, round.id, {
+        outcome_key: outcomeKey,
+        stake: stakeAmount,
+      });
+      setMessage("Your virtual bet is saved. You can update it until the timer ends.");
+      const latest = await api.getVirtualGames(session.token);
+      setData(latest);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
-      setSavingRoom(null);
+      setSaving(false);
     }
   }
 
   const gameNames = Object.fromEntries(games.map((game) => [game.id, game.name]));
+  const round = data?.active_round;
+  const secondsRemaining = round
+    ? Math.max(0, Math.ceil((new Date(round.closes_at).getTime() - clock) / 1000))
+    : 0;
+  const estimatedReturn = round?.options.find((option) => option.key === outcomeKey);
+  const possiblePayout = estimatedReturn && Number.isInteger(Number(stake))
+    ? Math.floor(Number(stake) * estimatedReturn.odds_milli / 1000)
+    : 0;
 
   return (
     <section className="predictions-section" id="predictions">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">PREDICT FOR FUN</p>
-          <h2>Free predictions</h2>
+          <p className="eyebrow">VIRTUAL GAME ROUNDS</p>
+          <h2>Predict a past match</h2>
         </div>
-        <p className="section-note">Earn points for correct picks. Points have no cash value.</p>
+        <p className="section-note">Completed AusPlay matches, replayed as a timed simulation.</p>
       </div>
       {!session ? (
         <div className="card prediction-empty">
-          <p>Sign in to predict match outcomes and track your points.</p>
+          <p>Sign in to receive virtual credits and play historical prediction rounds.</p>
           <ActionButton className="btn" onClick={onLogin}>Log in or sign up</ActionButton>
         </div>
       ) : (
         <>
           <div className="prediction-summary">
             <div className="prediction-points">
-              <span>Your prediction points</span>
-              <strong>{data?.points ?? 0}</strong>
+              <span>Your virtual-credit balance</span>
+              <strong>{data?.balance ?? 1000}</strong>
             </div>
-            <p>One point for a correct result. No stakes, purchases, cash-outs, or prizes.</p>
+            <p>Credits are free, non-purchasable, non-redeemable, and have no cash value.</p>
             <ActionButton
               className="link"
-              onClick={() => api.getPredictions(session.token)
+              onClick={() => api.getVirtualGames(session.token)
                 .then(setData)
                 .catch((requestError) => setError(requestError.message))}
               disabled={loading}
@@ -1483,94 +1485,115 @@ function PredictionWorkspace({ session, games, onLogin }) {
           {error && <p className="error prediction-feedback" role="alert">{error}</p>}
           {message && <p className="success prediction-feedback" role="status">{message}</p>}
           {loading && !data ? (
-            <p className="login-prompt" role="status">Loading predictions...</p>
-          ) : data?.markets.length ? (
-            <div className="grid prediction-grid">
-              {data.markets.map((market) => {
-                const selected = selections[market.room_id] || "";
-                const gameName = gameNames[market.game_id] || market.game_id;
-                return (
-                  <article className="card prediction-card" key={market.room_id}>
-                    <div className="prediction-card-heading">
-                      <div>
-                        <span className="prediction-game">{gameName}</span>
-                        <h3>{market.room_name}</h3>
-                      </div>
-                      <span className="prediction-count">{market.prediction_count} picks</span>
-                    </div>
-                    <p className="prediction-players">
-                      {market.players.map((player) => player.display_name).join(" vs ")}
-                    </p>
-                    <fieldset>
-                      <legend>Who will win?</legend>
-                      {market.players.map((player) => (
-                        <label
-                          className={`prediction-option${selected === String(player.id) ? " selected" : ""}`}
-                          key={player.id}
-                        >
-                          <input
-                            type="radio"
-                            name={`prediction-${market.room_id}`}
-                            value={player.id}
-                            checked={selected === String(player.id)}
-                            onChange={() => setSelections((current) => ({
-                              ...current,
-                              [market.room_id]: String(player.id),
-                            }))}
-                          />
-                          <span>{player.display_name}</span>
-                        </label>
-                      ))}
-                      <label className={`prediction-option${selected === "draw" ? " selected" : ""}`}>
-                        <input
-                          type="radio"
-                          name={`prediction-${market.room_id}`}
-                          value="draw"
-                          checked={selected === "draw"}
-                          onChange={() => setSelections((current) => ({
-                            ...current,
-                            [market.room_id]: "draw",
-                          }))}
-                        />
-                        <span>Draw / tie</span>
-                      </label>
-                    </fieldset>
-                    <p className="prediction-lock-note">
-                      All players opted in. Picks close when the host starts the match.
-                    </p>
-                    <ActionButton
-                      className="btn prediction-submit"
-                      onClick={() => savePrediction(market)}
-                      disabled={savingRoom === market.room_id || !selected}
-                      loading={savingRoom === market.room_id}
-                    >
-                      {market.my_prediction ? "Update prediction" : "Save prediction"}
-                    </ActionButton>
-                  </article>
-                );
-              })}
-            </div>
+            <p className="login-prompt" role="status">Loading virtual game...</p>
+          ) : round ? (
+            <article className="card prediction-card">
+              <div className="prediction-card-heading">
+                <div>
+                  <span className="prediction-game">
+                    {gameNames[round.game_id] || round.game_id}
+                  </span>
+                  <h3>Historical match simulation</h3>
+                </div>
+                <div
+                  className="prediction-timer"
+                  aria-label={`${secondsRemaining} seconds remaining in this round`}
+                >
+                  <span>{secondsRemaining}s</span>
+                  <small>{round.my_bet ? "Round closes in" : "Betting closes in"}</small>
+                </div>
+              </div>
+              <p className="prediction-lock-note">
+                The result is from a completed match. Player labels are anonymous; this is not live play.
+              </p>
+              <fieldset>
+                <legend>Choose an outcome</legend>
+                {round.options.map((option) => (
+                  <label
+                    className={`prediction-option${outcomeKey === option.key ? " selected" : ""}`}
+                    key={option.key}
+                  >
+                    <input
+                      type="radio"
+                      name={`virtual-round-${round.id}`}
+                      value={option.key}
+                      checked={outcomeKey === option.key}
+                      onChange={() => setOutcomeKey(option.key)}
+                    />
+                    <span>{option.label}</span>
+                    <strong>{(option.odds_milli / 1000).toFixed(2)}x</strong>
+                  </label>
+                ))}
+              </fieldset>
+              <label className="prediction-stake">
+                Stake in virtual credits
+                <input
+                  type="number"
+                  min="1"
+                  max={data.balance}
+                  step="1"
+                  value={stake}
+                  onChange={(event) => setStake(event.target.value)}
+                />
+              </label>
+              {outcomeKey && (
+                <p className="prediction-lock-note">
+                  Possible return: {possiblePayout.toLocaleString()} credits, including your stake.
+                  Odds use add-one-smoothed outcome frequencies from {round.sample_size} completed {gameNames[round.game_id] || round.game_id} games with the same player count. Returns are rounded down to whole credits.
+                </p>
+              )}
+              <ActionButton
+                className="btn prediction-submit"
+                onClick={() => saveBet(round)}
+                disabled={saving || secondsRemaining === 0 || !outcomeKey}
+                loading={saving}
+              >
+                {round.my_bet ? "Update virtual bet" : "Place virtual bet"}
+              </ActionButton>
+            </article>
           ) : data && !error ? (
             <p className="empty-state">
-              No matches are ready for predictions. They appear here when everyone in a full room opts in.
+              No unused completed matches are available for a virtual round yet.
             </p>
           ) : null}
-          {data?.recent_predictions.length > 0 && (
+          {data?.recent_bets.length > 0 && (
             <div className="prediction-history">
-              <h3>Your recent predictions</h3>
+              <h3>Your recent virtual bets</h3>
               <div className="prediction-history-list">
-                {data.recent_predictions.map((prediction) => (
-                  <article className="prediction-history-item" key={prediction.room_id}>
+                {data.recent_bets.map((bet) => (
+                  <article className="prediction-history-item" key={bet.round_id}>
                     <div>
-                      <strong>{gameNames[prediction.game_id] || prediction.game_id}: {prediction.room_name}</strong>
-                      <span>Your pick: {prediction.outcome}</span>
-                      {prediction.result && <span>Result: {prediction.result}</span>}
+                      <strong>{gameNames[bet.game_id] || bet.game_id}: virtual round</strong>
+                      <span>Your pick: {bet.outcome}</span>
+                      {bet.result && <span>Past result: {bet.result}</span>}
                     </div>
-                    <div className={`prediction-result ${prediction.status}`}>
-                      <span>{prediction.status === "pending"
-                        ? "Awaiting result"
-                        : prediction.status === "correct" ? "Correct" : "Not correct"}</span>
-                      {prediction.status !== "pending" && <strong>+{prediction.points} pt</strong>}
+                    <div className={`prediction-result ${bet.status}`}>
+                      <span>{bet.status === "pending"
+                        ? "Awaiting reveal"
+                        : bet.status === "won" ? "Won" : "Not this time"}</span>
+                      {bet.status !== "pending" && (
+                        <strong>{bet.status === "won" ? "+" : "-"}
+                          {bet.status === "won" ? bet.payout : bet.stake} credits</strong>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+          {data?.recent_rounds.length > 0 && (
+            <div className="prediction-history">
+              <h3>Recently revealed rounds</h3>
+              <div className="prediction-history-list">
+                {data.recent_rounds.map((pastRound) => (
+                  <article className="prediction-history-item" key={pastRound.id}>
+                    <div>
+                      <strong>{pastRound.game_name} · historical simulation</strong>
+                      <span>{pastRound.participant_count} anonymous players</span>
+                    </div>
+                    <div className="prediction-result">
+                      <span>Past result</span>
+                      <strong>{pastRound.result}</strong>
                     </div>
                   </article>
                 ))}
@@ -3114,7 +3137,6 @@ const GAME_DESCRIPTIONS = {
 
 const ROOM_AVAILABILITY_LABELS = {
   waiting: "Waiting for players",
-  ready: "Ready to start",
   full: "Full",
   "in-progress": "In progress",
   completed: "Completed",
@@ -3322,8 +3344,6 @@ function HomeApp() {
   const [roomSearch, setRoomSearch] = useState("");
   const [roomAvailabilityFilter, setRoomAvailabilityFilter] = useState("all");
   const [roomGameFilter, setRoomGameFilter] = useState("all");
-  const [roomPredictionOptIns, setRoomPredictionOptIns] = useState({});
-  const [allowRoomPredictions, setAllowRoomPredictions] = useState(false);
   const [hostApplication, setHostApplication] = useState(null);
   const [hostApplicationLoading, setHostApplicationLoading] = useState(false);
   const [breakReminderMinutes, setBreakReminderMinutes] = useState(60);
@@ -3714,10 +3734,8 @@ function HomeApp() {
         game_id: gameId,
         name: roomName,
         max_players: maxPlayers,
-        allow_predictions: allowRoomPredictions,
       });
       setRoomName("");
-      setAllowRoomPredictions(false);
       await reloadRooms();
       setNotice(`Practice room "${room.name}" created.`);
     } catch (err) {
@@ -3731,35 +3749,13 @@ function HomeApp() {
     setBusyRoom(room.id);
     setNotice("");
     try {
-      const predictionOptIn = Boolean(roomPredictionOptIns[room.id]);
-      const result = await api.joinPracticeRoom(session.token, room.id, predictionOptIn);
-      setRoomPredictionOptIns((current) => {
-        const next = { ...current };
-        delete next[room.id];
-        return next;
-      });
+      const result = await api.joinPracticeRoom(session.token, room.id);
       await reloadRooms();
       if (result.game_started) {
         await openGame(room);
-      } else if (result.awaiting_host_start) {
-        setNotice("Everyone opted in. The match is ready; the host will start it when predictions are complete.");
       } else {
         setNotice(`You joined "${room.name}" (${result.players}/${result.max_players} players).`);
       }
-    } catch (err) {
-      setNotice(err.message);
-    } finally {
-      setBusyRoom(null);
-    }
-  }
-
-  async function startPredictionMatch(room) {
-    setBusyRoom(room.id);
-    setNotice("");
-    try {
-      await api.startPredictionRoom(session.token, room.id);
-      await reloadRooms();
-      await openGame(room);
     } catch (err) {
       setNotice(err.message);
     } finally {
@@ -4040,7 +4036,7 @@ function HomeApp() {
           <a className="nav-anchor" href="#home">Home</a>
           <a className="nav-anchor" href="#games">Games</a>
           <a className="nav-anchor" href="#practice-rooms">Practice Rooms</a>
-          <a className="nav-anchor" href="#predictions">Predictions</a>
+          <a className="nav-anchor" href="#predictions">Virtual Games</a>
         </div>
         <div className="nav-links">
           {session ? (
@@ -4080,9 +4076,9 @@ function HomeApp() {
           <NavigationIcon name="play" />
           <small>Play</small>
         </button>
-        <a href="#predictions" aria-label="Predictions">
+        <a href="#predictions" aria-label="Virtual Games">
           <NavigationIcon name="predict" />
-          <small>Predict</small>
+          <small>Virtual</small>
         </a>
         <button type="button" onClick={openProfile} aria-label="Profile">
           <NavigationIcon name="profile" />
@@ -4343,7 +4339,7 @@ function HomeApp() {
         />
       )}
 
-      <PredictionWorkspace
+      <VirtualGamesWorkspace
         session={session}
         games={games}
         onLogin={() => setMode("signup")}
@@ -4408,14 +4404,6 @@ function HomeApp() {
                 {playerOptions.map((count) => <option key={count} value={count}>{count} players</option>)}
               </select>
             </label>
-            <label className="room-prediction-toggle">
-              <input
-                type="checkbox"
-                checked={allowRoomPredictions}
-                onChange={(event) => setAllowRoomPredictions(event.target.checked)}
-              />
-              <span>List this match for free predictions. Every player must opt in; points have no cash value.</span>
-            </label>
             <ActionButton className="btn" type="submit" loading={creatingRoom}>
               {creatingRoom ? "Creating..." : "Create room"}
             </ActionButton>
@@ -4456,7 +4444,6 @@ function HomeApp() {
             >
               <option value="all">All rooms</option>
               <option value="waiting">Waiting for players</option>
-              <option value="ready">Ready to start</option>
               <option value="full">Full</option>
               <option value="in-progress">In progress</option>
               <option value="completed">Completed</option>
@@ -4518,35 +4505,8 @@ function HomeApp() {
                   )}
                   {session && room.viewer_is_seated && room.game_status === "not_started" && (
                     <p className="room-unavailable">
-                      {room.prediction_ready
-                        ? "Everyone opted in. Predictions are open until the host starts."
-                        : room.viewer_prediction_opted_in
-                          ? "You opted in. Waiting for the room to fill."
-                          : "You’re in. Waiting for more players."}
+                      You’re in. Waiting for more players.
                     </p>
-                  )}
-                  {session && room.prediction_ready && room.host === session.username && (
-                    <ActionButton
-                      className="btn room-join"
-                      onClick={() => startPredictionMatch(room)}
-                      disabled={busyRoom === room.id}
-                      loading={busyRoom === room.id}
-                    >
-                      Start match
-                    </ActionButton>
-                  )}
-                  {session && room.prediction_opt_in_available && !room.viewer_is_seated && (
-                    <label className="room-prediction-toggle">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(roomPredictionOptIns[room.id])}
-                        onChange={(event) => setRoomPredictionOptIns((current) => ({
-                          ...current,
-                          [room.id]: event.target.checked,
-                        }))}
-                      />
-                      <span>Include this match in free predictions (no-cash points)</span>
-                    </label>
                   )}
                   {!session && availability === "waiting" && (
                     <p className="room-unavailable">Log in to join this room.</p>

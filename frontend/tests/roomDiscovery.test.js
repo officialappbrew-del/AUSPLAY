@@ -18,7 +18,6 @@ const rooms = [
     host: "playertwo",
     status: "full",
     game_status: "not_started",
-    prediction_ready: true,
   },
   {
     id: 3,
@@ -41,7 +40,7 @@ const rooms = [
 test("maps backend room and game states to truthful discovery availability", () => {
   assert.deepEqual(rooms.map(getRoomAvailability), [
     "waiting",
-    "ready",
+    "full",
     "in-progress",
     "completed",
   ]);

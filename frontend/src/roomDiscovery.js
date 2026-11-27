@@ -5,7 +5,6 @@ export function uniqueRooms(rooms) {
 export function getRoomAvailability(room) {
   if (room.game_status === "active") return "in-progress";
   if (room.game_status === "finished") return "completed";
-  if (room.prediction_ready) return "ready";
   if (room.status === "full") return "full";
   return "waiting";
 }

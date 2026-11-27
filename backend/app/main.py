@@ -7,6 +7,7 @@ import re
 import secrets
 import smtplib
 import ssl
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Literal
@@ -150,12 +151,11 @@ class PracticeRoomCreate(BaseModel):
     game_id: str
     name: str
     max_players: int
-    allow_predictions: bool = False
 
 
-class PredictionSubmission(BaseModel):
-    predicted_winner_user_id: int | None = None
-    predicts_draw: bool = False
+class VirtualBetSubmission(BaseModel):
+    outcome_key: str = Field(min_length=1, max_length=16)
+    stake: int = Field(ge=1, le=1_000_000)
 
 
 class DraughtsMove(BaseModel):
@@ -217,7 +217,7 @@ GAME_PLAYER_LIMITS = {
     "snooker": (2, 2),
 }
 PLAYABLE_GAME_IDS = {"draughts", "ludo", "whot", "chess", "golf", "polo", "snooker"}
-PREDICTION_GAME_MODELS = {
+HISTORICAL_GAME_MODELS = {
     "draughts": models.DraughtsGame,
     "ludo": models.LudoGame,
     "whot": models.WhotGame,
@@ -525,6 +525,15 @@ def register(body: Credentials, response: Response, db: Session = Depends(get_db
         password_hash=hash_password(body.password),
     )
     db.add(user)
+    db.flush()
+    db.add(models.VirtualCreditWallet(user_id=user.id, balance=1000))
+    db.add(
+        models.VirtualCreditTransaction(
+            user_id=user.id,
+            amount=1000,
+            entry_type="initial_grant",
+        )
+    )
     db.commit()
 
     email_verification_sent = False
@@ -1827,14 +1836,6 @@ def practice_rooms(
         )
         .order_by(models.PracticeRoom.created_at.desc())
     ).all()
-    room_ids = [room.id for room, *_ in rows]
-    consent_rows = db.execute(
-        select(models.RoomPredictionConsent.room_id, models.RoomPredictionConsent.user_id)
-        .where(models.RoomPredictionConsent.room_id.in_(room_ids))
-    ).all() if room_ids else []
-    consents_by_room: dict[int, set[int]] = {}
-    for room_id, user_id in consent_rows:
-        consents_by_room.setdefault(room_id, set()).add(user_id)
 
     return [
         {
@@ -1847,19 +1848,6 @@ def practice_rooms(
             "status": "full" if player_count >= room.max_players else "open",
             "game_status": game_status or "not_started",
             "viewer_is_seated": bool(viewer_is_seated),
-            "viewer_prediction_opted_in": viewer_id in consents_by_room.get(room.id, set()),
-            "prediction_opt_in_available": (
-                room.host_user_id in consents_by_room.get(room.id, set())
-                and player_count < room.max_players
-                and game_status is None
-            ),
-            "prediction_ready": (
-                player_count == room.max_players
-                and player_count >= 2
-                and len(consents_by_room.get(room.id, set())) == player_count
-                and room.host_user_id in consents_by_room.get(room.id, set())
-                and game_status is None
-            ),
         }
         for room, host_username, player_count, game_status, viewer_is_seated in rows
     ]
@@ -2035,13 +2023,6 @@ def create_practice_room(
             seat_number=1,
         )
     )
-    if body.allow_predictions:
-        db.add(
-            models.RoomPredictionConsent(
-                room_id=room.id,
-                user_id=user.id,
-            )
-        )
     db.commit()
     return {"id": room.id, "name": room.name, "game_id": room.game_id}
 
@@ -2051,7 +2032,6 @@ async def join_practice_room(
     room_id: int,
     user: models.User = Depends(current_user),
     db: Session = Depends(get_db),
-    prediction_opt_in: bool = False,
 ):
     room = db.get(models.PracticeRoom, room_id)
     if not room:
@@ -2065,13 +2045,6 @@ async def join_practice_room(
     )
     if existing_seat:
         raise HTTPException(409, "You are already in this room")
-
-    host_opted_in = db.get(
-        models.RoomPredictionConsent,
-        (room.id, room.host_user_id),
-    ) is not None
-    if prediction_opt_in and not host_opted_in:
-        raise HTTPException(409, "The room host has not enabled predictions")
 
     player_count = db.scalar(
         select(func.count(models.PracticeRoomSeat.id)).where(
@@ -2088,13 +2061,6 @@ async def join_practice_room(
             seat_number=player_count + 1,
         )
     )
-    if prediction_opt_in:
-        db.add(
-            models.RoomPredictionConsent(
-                room_id=room.id,
-                user_id=user.id,
-            )
-        )
     db.flush()
     player_total = player_count + 1
     game_should_start = (
@@ -2103,323 +2069,411 @@ async def join_practice_room(
         room.game_id in {"ludo", "whot", "golf", "polo", "snooker"}
         and player_total == room.max_players
     )
-    consent_count = db.scalar(
-        select(func.count(models.RoomPredictionConsent.user_id)).where(
-            models.RoomPredictionConsent.room_id == room.id
-        )
-    )
-    prediction_lobby = (
-        game_should_start
-        and host_opted_in
-        and consent_count == player_total
-    )
-    game_started = game_should_start and not prediction_lobby
-    if game_started:
+    if game_should_start:
         _start_room_game(db, room)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(409, "Room changed while joining; refresh and try again") from exc
-    if game_started:
+    if game_should_start:
         await room_updates.publish(room.id, 0)
     return {
         "room_id": room.id,
         "players": player_count + 1,
         "max_players": room.max_players,
-        "game_started": game_started,
-        "awaiting_host_start": prediction_lobby,
+        "game_started": game_should_start,
     }
 
 
-def _room_prediction_ready(room: models.PracticeRoom, db: Session) -> tuple[bool, list[int]]:
-    seats = db.scalars(
-        select(models.PracticeRoomSeat)
-        .where(models.PracticeRoomSeat.room_id == room.id)
-        .order_by(models.PracticeRoomSeat.seat_number)
-    ).all()
-    seat_user_ids = [seat.user_id for seat in seats]
-    consented_user_ids = set(db.scalars(
-        select(models.RoomPredictionConsent.user_id).where(
-            models.RoomPredictionConsent.room_id == room.id
-        )
-    ).all())
-    return (
-        len(seat_user_ids) == room.max_players
-        and room.host_user_id in consented_user_ids
-        and set(seat_user_ids) == consented_user_ids,
-        seat_user_ids,
-    )
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
-@app.post("/rooms/{room_id}/start")
-async def start_prediction_room(
-    room_id: int,
-    user: models.User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    room = db.scalar(
-        select(models.PracticeRoom)
-        .where(models.PracticeRoom.id == room_id)
-        .with_for_update()
-    )
-    if not room:
-        raise HTTPException(404, "Practice room not found")
-    if room.host_user_id != user.id:
-        raise HTTPException(403, "Only the room host can start this match")
-    prediction_ready, _ = _room_prediction_ready(room, db)
-    if not prediction_ready:
-        raise HTTPException(
-            409,
-            "All players must opt in and the room must be full before the host can start",
-        )
-    game_model = PREDICTION_GAME_MODELS[room.game_id]
-    if db.scalar(
-        select(game_model.id).where(game_model.room_id == room.id).limit(1)
-    ) is not None:
-        raise HTTPException(409, "This match has already started")
-
-    try:
-        _start_room_game(db, room)
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(409, "This match has already started") from exc
-    await room_updates.publish(room.id, 0)
-    return {"room_id": room.id, "game_started": True}
-
-
-def _completed_prediction_results(
-    db: Session,
-    rooms_by_id: dict[int, models.PracticeRoom],
-    room_ids: set[int],
-) -> dict[int, set[int]]:
-    results: dict[int, set[int]] = {}
-    for game_id, game_model in PREDICTION_GAME_MODELS.items():
-        matching_room_ids = [
-            room_id for room_id in room_ids
-            if rooms_by_id.get(room_id) and rooms_by_id[room_id].game_id == game_id
-        ]
-        if not matching_room_ids:
-            continue
+def _completed_historical_records(db: Session) -> list[dict]:
+    records = []
+    for game_id, game_model in HISTORICAL_GAME_MODELS.items():
         games = db.scalars(
-            select(game_model).where(
-                game_model.room_id.in_(matching_room_ids),
-                game_model.status == "finished",
-            )
+            select(game_model)
+            .where(game_model.status == "finished")
+            .order_by(game_model.updated_at.desc())
+            .limit(1000)
         ).all()
+        if not games:
+            continue
+        room_ids = [game.room_id for game in games]
+        seat_rows = db.execute(
+            select(
+                models.PracticeRoomSeat.room_id,
+                models.PracticeRoomSeat.user_id,
+                models.PracticeRoomSeat.seat_number,
+            )
+            .where(models.PracticeRoomSeat.room_id.in_(room_ids))
+            .order_by(models.PracticeRoomSeat.room_id, models.PracticeRoomSeat.seat_number)
+        ).all()
+        players_by_room: dict[int, list[int]] = {}
+        for room_id, player_id, _ in seat_rows:
+            players_by_room.setdefault(room_id, []).append(player_id)
+
         for game in games:
             state = game.state
             if state.get("status") != "finished":
+                continue
+            player_ids = players_by_room.get(game.room_id, [])
+            if not 2 <= len(player_ids) <= 4:
                 continue
             winner_user_ids = state.get("winner_user_ids")
             if winner_user_ids is None:
                 winner_user_id = state.get("winner_user_id")
                 winner_user_ids = [] if winner_user_id is None else [winner_user_id]
-            results[game.room_id] = set(winner_user_ids)
-    return results
-
-
-@app.get("/predictions")
-def get_predictions(
-    user: models.User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    room_summaries = practice_rooms(None, db, None)
-    ready_rooms = [
-        room for room in room_summaries
-        if room["prediction_ready"] and not room["viewer_is_seated"]
-    ]
-    market_room_ids = [room["id"] for room in ready_rooms]
-    participants_by_room: dict[int, list[dict]] = {}
-    if market_room_ids:
-        participant_rows = db.execute(
-            select(
-                models.PracticeRoomSeat.room_id,
-                models.User.id,
-                models.User.username,
-                models.User.display_name,
-            )
-            .join(models.User, models.User.id == models.PracticeRoomSeat.user_id)
-            .where(models.PracticeRoomSeat.room_id.in_(market_room_ids))
-            .order_by(
-                models.PracticeRoomSeat.room_id,
-                models.PracticeRoomSeat.seat_number,
-            )
-        ).all()
-        for room_id, player_id, username, display_name in participant_rows:
-            participants_by_room.setdefault(room_id, []).append({
-                "id": player_id,
-                "username": username,
-                "display_name": display_name or username,
+            winners = set(winner_user_ids)
+            if len(winners) == 1:
+                winner_id = next(iter(winners))
+                if winner_id not in player_ids:
+                    continue
+                outcome_key = f"player_{player_ids.index(winner_id) + 1}"
+            else:
+                outcome_key = "draw"
+            records.append({
+                "game_id": game_id,
+                "source_game_id": game.id,
+                "source_room_id": game.room_id,
+                "participant_count": len(player_ids),
+                "outcome_key": outcome_key,
+                "updated_at": game.updated_at,
             })
+    return records
 
-    predictions_by_room: dict[int, models.MatchPrediction] = {}
-    prediction_counts: dict[int, int] = {}
-    if market_room_ids:
-        predictions = db.scalars(
-            select(models.MatchPrediction).where(
-                models.MatchPrediction.room_id.in_(market_room_ids)
-            )
-        ).all()
-        for prediction in predictions:
-            prediction_counts[prediction.room_id] = (
-                prediction_counts.get(prediction.room_id, 0) + 1
-            )
-            if prediction.user_id == user.id:
-                predictions_by_room[prediction.room_id] = prediction
 
-    markets = []
-    for room in ready_rooms:
-        if user.id in {
-            player["id"] for player in participants_by_room.get(room["id"], [])
-        }:
-            continue
-        prediction = predictions_by_room.get(room["id"])
-        markets.append({
-            "room_id": room["id"],
-            "room_name": room["name"],
-            "game_id": room["game_id"],
-            "players": participants_by_room.get(room["id"], []),
-            "prediction_count": prediction_counts.get(room["id"], 0),
-            "my_prediction": (
-                {
-                    "predicted_winner_user_id": prediction.predicted_winner_user_id,
-                    "predicts_draw": prediction.predicts_draw,
-                }
-                if prediction else None
-            ),
-        })
+def _round_odds(records: list[dict], source: dict) -> tuple[dict[str, int], int]:
+    outcomes = [f"player_{index}" for index in range(1, source["participant_count"] + 1)]
+    outcomes.append("draw")
+    history = [
+        record for record in records
+        if record["game_id"] == source["game_id"]
+        and record["participant_count"] == source["participant_count"]
+        and record["source_game_id"] != source["source_game_id"]
+    ]
+    counts = Counter(record["outcome_key"] for record in history)
+    odds = {}
+    numerator = (len(history) + len(outcomes)) * 1000
+    for outcome in outcomes:
+        divisor = counts[outcome] + 1
+        odds[outcome] = (numerator + divisor // 2) // divisor
+    return odds, len(history)
 
-    user_predictions = db.scalars(
-        select(models.MatchPrediction)
-        .where(models.MatchPrediction.user_id == user.id)
-        .order_by(models.MatchPrediction.updated_at.desc())
+
+def _settle_virtual_round(db: Session, virtual_round: models.VirtualRound) -> None:
+    if virtual_round.status != "open":
+        return
+    now = models.now()
+    bets = db.scalars(
+        select(models.VirtualBet)
+        .where(models.VirtualBet.round_id == virtual_round.id)
+        .with_for_update()
     ).all()
-    history_room_ids = {prediction.room_id for prediction in user_predictions}
-    history_rooms = db.scalars(
-        select(models.PracticeRoom).where(
-            models.PracticeRoom.id.in_(history_room_ids)
+    for bet in bets:
+        if bet.payout is not None:
+            continue
+        payout = (
+            bet.stake * bet.odds_milli // 1000
+            if bet.outcome_key == virtual_round.outcome_key
+            else 0
         )
-    ).all() if history_room_ids else []
-    history_rooms_by_id = {room.id: room for room in history_rooms}
-    results_by_room = _completed_prediction_results(
-        db, history_rooms_by_id, history_room_ids
-    )
-    outcome_user_ids = {
-        prediction.predicted_winner_user_id
-        for prediction in user_predictions
-        if prediction.predicted_winner_user_id is not None
-    }
-    for winners in results_by_room.values():
-        outcome_user_ids.update(winners)
-    outcome_users = db.scalars(
-        select(models.User).where(models.User.id.in_(outcome_user_ids))
-    ).all() if outcome_user_ids else []
-    names_by_user_id = {
-        player.id: player.display_name or player.username
-        for player in outcome_users
-    }
-
-    history = []
-    total_points = 0
-    for prediction in user_predictions:
-        room = history_rooms_by_id.get(prediction.room_id)
-        winners = results_by_room.get(prediction.room_id)
-        is_correct = None
-        if winners is not None:
-            is_correct = (
-                len(winners) != 1
-                if prediction.predicts_draw
-                else winners == {prediction.predicted_winner_user_id}
+        bet.payout = payout
+        bet.updated_at = now
+        if payout:
+            wallet = db.scalar(
+                select(models.VirtualCreditWallet)
+                .where(models.VirtualCreditWallet.user_id == bet.user_id)
+                .with_for_update()
             )
-            total_points += int(is_correct)
-        winner_names = [names_by_user_id[player_id] for player_id in sorted(winners or set())]
-        history.append({
-            "room_id": prediction.room_id,
-            "room_name": room.name if room else "Practice match",
-            "game_id": room.game_id if room else "unknown",
-            "outcome": (
-                "Draw / tie"
-                if prediction.predicts_draw
-                else names_by_user_id.get(prediction.predicted_winner_user_id, "Unknown player")
-            ),
-            "result": (
-                "Draw / tie" if not winner_names
-                else ", ".join(winner_names)
-            ) if winners is not None else None,
-            "status": (
-                "pending" if winners is None
-                else "correct" if is_correct
-                else "incorrect"
-            ),
-            "points": int(is_correct) if is_correct is not None else 0,
-            "updated_at": prediction.updated_at,
-        })
+            if wallet is None:
+                raise RuntimeError(f"Virtual-credit wallet missing for user {bet.user_id}")
+            wallet.balance += payout
+            wallet.updated_at = now
+            db.add(
+                models.VirtualCreditTransaction(
+                    user_id=bet.user_id,
+                    round_id=virtual_round.id,
+                    amount=payout,
+                    entry_type="payout",
+                )
+            )
+    virtual_round.status = "settled"
+    virtual_round.settled_at = now
 
+
+def _public_virtual_round(
+    virtual_round: models.VirtualRound,
+    my_bet: models.VirtualBet | None,
+) -> dict:
+    letters = ["A", "B", "C", "D"]
+    options = [
+        {
+            "key": f"player_{index}",
+            "label": f"Player {letters[index - 1]}",
+            "odds_milli": virtual_round.odds[f"player_{index}"],
+        }
+        for index in range(1, virtual_round.participant_count + 1)
+    ]
+    options.append({
+        "key": "draw",
+        "label": "Draw / tie",
+        "odds_milli": virtual_round.odds["draw"],
+    })
     return {
-        "points": total_points,
-        "prediction_count": len(user_predictions),
-        "markets": markets,
-        "recent_predictions": history[:20],
+        "id": virtual_round.id,
+        "game_id": virtual_round.game_id,
+        "participant_count": virtual_round.participant_count,
+        "sample_size": virtual_round.sample_size,
+        "opened_at": virtual_round.opened_at,
+        "closes_at": virtual_round.closes_at,
+        "options": options,
+        "my_bet": (
+            {
+                "outcome_key": my_bet.outcome_key,
+                "stake": my_bet.stake,
+                "odds_milli": my_bet.odds_milli,
+            }
+            if my_bet else None
+        ),
     }
 
 
-@app.post("/predictions/{room_id}")
-def submit_prediction(
-    room_id: int,
-    body: PredictionSubmission,
-    user: models.User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    room = db.scalar(
-        select(models.PracticeRoom)
-        .where(models.PracticeRoom.id == room_id)
+def _virtual_outcome_label(outcome_key: str) -> str:
+    if outcome_key == "draw":
+        return "Draw / tie"
+    if outcome_key.startswith("player_"):
+        try:
+            player_number = int(outcome_key.removeprefix("player_"))
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid virtual-round outcome: {outcome_key}") from exc
+        if 1 <= player_number <= 4:
+            return f"Player {['A', 'B', 'C', 'D'][player_number - 1]}"
+    raise RuntimeError(f"Invalid virtual-round outcome: {outcome_key}")
+
+
+def _open_or_rotate_virtual_round(db: Session) -> models.VirtualRound | None:
+    virtual_round = db.scalar(
+        select(models.VirtualRound)
+        .where(models.VirtualRound.status == "open")
         .with_for_update()
     )
-    if not room:
-        raise HTTPException(404, "Practice room not found")
-    is_ready, seat_user_ids = _room_prediction_ready(room, db)
-    game_model = PREDICTION_GAME_MODELS[room.game_id]
-    match_started = db.scalar(
-        select(game_model.id).where(game_model.room_id == room.id).limit(1)
-    ) is not None
-    if not is_ready or match_started:
-        raise HTTPException(409, "Predictions are closed for this match")
-    if user.id in seat_user_ids:
-        raise HTTPException(403, "Players in this match cannot predict its outcome")
-    if body.predicts_draw == (body.predicted_winner_user_id is not None):
-        raise HTTPException(422, "Choose either one winner or a draw")
-    if (
-        body.predicted_winner_user_id is not None
-        and body.predicted_winner_user_id not in seat_user_ids
-    ):
-        raise HTTPException(422, "Choose a player in this match")
+    if virtual_round is not None:
+        if _as_utc(virtual_round.closes_at) > _as_utc(models.now()):
+            return virtual_round
+        _settle_virtual_round(db, virtual_round)
 
-    prediction = db.scalar(
-        select(models.MatchPrediction).where(
-            models.MatchPrediction.room_id == room.id,
-            models.MatchPrediction.user_id == user.id,
+    records = _completed_historical_records(db)
+    used_sources = set(db.execute(
+        select(models.VirtualRound.game_id, models.VirtualRound.source_game_id)
+    ).all())
+    available = [
+        record for record in records
+        if (record["game_id"], record["source_game_id"]) not in used_sources
+    ]
+    if not available:
+        return None
+    source = min(available, key=lambda record: _as_utc(record["updated_at"]))
+    odds, sample_size = _round_odds(records, source)
+    virtual_round = models.VirtualRound(
+        game_id=source["game_id"],
+        source_game_id=source["source_game_id"],
+        source_room_id=source["source_room_id"],
+        participant_count=source["participant_count"],
+        outcome_key=source["outcome_key"],
+        odds=odds,
+        sample_size=sample_size,
+        status="open",
+        opened_at=models.now(),
+        closes_at=models.now() + timedelta(seconds=60),
+    )
+    db.add(virtual_round)
+    db.flush()
+    return virtual_round
+
+
+@app.get("/virtual-games")
+def get_virtual_games(
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    wallet = db.scalar(
+        select(models.VirtualCreditWallet)
+        .where(models.VirtualCreditWallet.user_id == user.id)
+        .with_for_update()
+    )
+    if wallet is None:
+        raise HTTPException(503, "Virtual-credit wallet is not initialized for this account")
+    try:
+        virtual_round = _open_or_rotate_virtual_round(db)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        virtual_round = db.scalar(
+            select(models.VirtualRound)
+            .where(models.VirtualRound.status == "open")
+            .order_by(models.VirtualRound.id.desc())
+        )
+        if virtual_round is None:
+            raise HTTPException(409, "A new virtual round could not be opened; refresh and try again")
+        wallet = db.get(models.VirtualCreditWallet, user.id)
+
+    my_bet = None
+    if virtual_round is not None and virtual_round.status == "open":
+        my_bet = db.scalar(
+            select(models.VirtualBet).where(
+                models.VirtualBet.round_id == virtual_round.id,
+                models.VirtualBet.user_id == user.id,
+            )
+        )
+    recent_bets = db.execute(
+        select(models.VirtualBet, models.VirtualRound)
+        .join(models.VirtualRound, models.VirtualRound.id == models.VirtualBet.round_id)
+        .where(models.VirtualBet.user_id == user.id)
+        .order_by(models.VirtualBet.updated_at.desc())
+        .limit(20)
+    ).all()
+    recent_rounds = db.scalars(
+        select(models.VirtualRound)
+        .where(models.VirtualRound.status == "settled")
+        .order_by(models.VirtualRound.settled_at.desc())
+        .limit(10)
+    ).all()
+    labels = {
+        "draughts": "Draughts",
+        "chess": "Chess",
+        "golf": "Golf",
+        "polo": "Polo",
+        "snooker": "Snooker",
+        "ludo": "Ludo",
+        "whot": "Whot",
+    }
+    return {
+        "balance": wallet.balance,
+        "active_round": (
+            _public_virtual_round(virtual_round, my_bet)
+            if virtual_round is not None and virtual_round.status == "open"
+            else None
+        ),
+        "recent_bets": [
+            {
+                "round_id": bet.round_id,
+                "game_id": round_row.game_id,
+                "outcome": _virtual_outcome_label(bet.outcome_key),
+                "result": (
+                    _virtual_outcome_label(round_row.outcome_key)
+                    if round_row.status == "settled" else None
+                ),
+                "stake": bet.stake,
+                "payout": bet.payout,
+                "status": "pending" if bet.payout is None else (
+                    "won" if bet.outcome_key == round_row.outcome_key else "lost"
+                ),
+                "updated_at": bet.updated_at,
+            }
+            for bet, round_row in recent_bets
+        ],
+        "recent_rounds": [
+            {
+                "id": round_row.id,
+                "game_id": round_row.game_id,
+                "game_name": labels.get(round_row.game_id, round_row.game_id.title()),
+                "participant_count": round_row.participant_count,
+                "result": _virtual_outcome_label(round_row.outcome_key),
+                "settled_at": round_row.settled_at,
+            }
+            for round_row in recent_rounds
+        ],
+    }
+
+
+@app.post("/virtual-games/rounds/{round_id}/bets")
+def place_virtual_bet(
+    round_id: int,
+    body: VirtualBetSubmission,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    virtual_round = db.scalar(
+        select(models.VirtualRound)
+        .where(models.VirtualRound.id == round_id)
+        .with_for_update()
+    )
+    if virtual_round is None:
+        raise HTTPException(404, "Virtual round not found")
+    if virtual_round.status != "open" or _as_utc(virtual_round.closes_at) <= _as_utc(models.now()):
+        if virtual_round.status == "open":
+            _settle_virtual_round(db, virtual_round)
+            db.commit()
+        raise HTTPException(409, "This virtual round is closed")
+    odds_milli = virtual_round.odds.get(body.outcome_key)
+    if odds_milli is None:
+        raise HTTPException(422, "Choose an outcome offered in this round")
+    wallet = db.scalar(
+        select(models.VirtualCreditWallet)
+        .where(models.VirtualCreditWallet.user_id == user.id)
+        .with_for_update()
+    )
+    if wallet is None:
+        raise HTTPException(503, "Virtual-credit wallet is not initialized for this account")
+    bet = db.scalar(
+        select(models.VirtualBet)
+        .where(
+            models.VirtualBet.round_id == round_id,
+            models.VirtualBet.user_id == user.id,
+        )
+        .with_for_update()
+    )
+    if bet is not None and bet.outcome_key == body.outcome_key and bet.stake == body.stake:
+        return {"balance": wallet.balance, "saved": True}
+    available = wallet.balance + (bet.stake if bet is not None else 0)
+    if body.stake > available:
+        raise HTTPException(422, "Your virtual-credit balance is too low for that stake")
+
+    now = models.now()
+    if bet is None:
+        bet = models.VirtualBet(
+            round_id=round_id,
+            user_id=user.id,
+            outcome_key=body.outcome_key,
+            stake=body.stake,
+            odds_milli=odds_milli,
+        )
+        db.add(bet)
+    else:
+        db.add(
+            models.VirtualCreditTransaction(
+                user_id=user.id,
+                round_id=round_id,
+                amount=bet.stake,
+                entry_type="stake_refund",
+            )
+        )
+        bet.outcome_key = body.outcome_key
+        bet.stake = body.stake
+        bet.odds_milli = odds_milli
+        bet.payout = None
+        bet.updated_at = now
+    wallet.balance = available - body.stake
+    wallet.updated_at = now
+    db.add(
+        models.VirtualCreditTransaction(
+            user_id=user.id,
+            round_id=round_id,
+            amount=-body.stake,
+            entry_type="stake",
         )
     )
-    if prediction is None:
-        prediction = models.MatchPrediction(
-            room_id=room.id,
-            user_id=user.id,
-            predicted_winner_user_id=body.predicted_winner_user_id,
-            predicts_draw=body.predicts_draw,
-        )
-        db.add(prediction)
-    else:
-        prediction.predicted_winner_user_id = body.predicted_winner_user_id
-        prediction.predicts_draw = body.predicts_draw
-        prediction.updated_at = models.now()
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(409, "Your prediction could not be saved; refresh and try again") from exc
-    return {"room_id": room.id, "saved": True}
+        raise HTTPException(409, "Your bet could not be saved; refresh and try again") from exc
+    return {"balance": wallet.balance, "saved": True}
 
 
 @app.get("/rooms/{room_id}/game")

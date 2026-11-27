@@ -6,11 +6,13 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -107,6 +109,74 @@ class MatchPrediction(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class VirtualCreditWallet(Base):
+    __tablename__ = "virtual_credit_wallets"
+    __table_args__ = (
+        CheckConstraint("balance >= 0", name="ck_virtual_credit_wallet_balance"),
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    balance: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class VirtualRound(Base):
+    __tablename__ = "virtual_rounds"
+    __table_args__ = (
+        UniqueConstraint("game_id", "source_game_id"),
+        CheckConstraint("participant_count >= 2", name="ck_virtual_round_participant_count"),
+        Index(
+            "uq_virtual_rounds_single_open",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+            sqlite_where=text("status = 'open'"),
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    game_id: Mapped[str] = mapped_column(String(24), index=True)
+    source_game_id: Mapped[int] = mapped_column(Integer)
+    source_room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"))
+    participant_count: Mapped[int] = mapped_column(Integer)
+    outcome_key: Mapped[str] = mapped_column(String(16))
+    odds: Mapped[dict[str, int]] = mapped_column(JSON)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    closes_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VirtualBet(Base):
+    __tablename__ = "virtual_bets"
+    __table_args__ = (
+        UniqueConstraint("round_id", "user_id"),
+        CheckConstraint("stake > 0", name="ck_virtual_bet_stake"),
+        CheckConstraint("odds_milli >= 1000", name="ck_virtual_bet_odds"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    round_id: Mapped[int] = mapped_column(ForeignKey("virtual_rounds.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    outcome_key: Mapped[str] = mapped_column(String(16))
+    stake: Mapped[int] = mapped_column(Integer)
+    odds_milli: Mapped[int] = mapped_column(Integer)
+    payout: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class VirtualCreditTransaction(Base):
+    __tablename__ = "virtual_credit_transactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    round_id: Mapped[int | None] = mapped_column(
+        ForeignKey("virtual_rounds.id"), nullable=True, index=True
+    )
+    amount: Mapped[int] = mapped_column(Integer)
+    entry_type: Mapped[str] = mapped_column(String(24))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class PracticeRoomMessage(Base):
