@@ -150,6 +150,12 @@ class PracticeRoomCreate(BaseModel):
     game_id: str
     name: str
     max_players: int
+    allow_predictions: bool = False
+
+
+class PredictionSubmission(BaseModel):
+    predicted_winner_user_id: int | None = None
+    predicts_draw: bool = False
 
 
 class DraughtsMove(BaseModel):
@@ -211,6 +217,15 @@ GAME_PLAYER_LIMITS = {
     "snooker": (2, 2),
 }
 PLAYABLE_GAME_IDS = {"draughts", "ludo", "whot", "chess", "golf", "polo", "snooker"}
+PREDICTION_GAME_MODELS = {
+    "draughts": models.DraughtsGame,
+    "ludo": models.LudoGame,
+    "whot": models.WhotGame,
+    "chess": models.ChessGame,
+    "golf": models.GolfGame,
+    "polo": models.PoloGame,
+    "snooker": models.SnookerGame,
+}
 RULEBOOK_DEFAULTS = {
     "chess": {
         "title": "Standard Chess",
@@ -1812,6 +1827,15 @@ def practice_rooms(
         )
         .order_by(models.PracticeRoom.created_at.desc())
     ).all()
+    room_ids = [room.id for room, *_ in rows]
+    consent_rows = db.execute(
+        select(models.RoomPredictionConsent.room_id, models.RoomPredictionConsent.user_id)
+        .where(models.RoomPredictionConsent.room_id.in_(room_ids))
+    ).all() if room_ids else []
+    consents_by_room: dict[int, set[int]] = {}
+    for room_id, user_id in consent_rows:
+        consents_by_room.setdefault(room_id, set()).add(user_id)
+
     return [
         {
             "id": room.id,
@@ -1823,9 +1847,159 @@ def practice_rooms(
             "status": "full" if player_count >= room.max_players else "open",
             "game_status": game_status or "not_started",
             "viewer_is_seated": bool(viewer_is_seated),
+            "viewer_prediction_opted_in": viewer_id in consents_by_room.get(room.id, set()),
+            "prediction_opt_in_available": (
+                room.host_user_id in consents_by_room.get(room.id, set())
+                and player_count < room.max_players
+                and game_status is None
+            ),
+            "prediction_ready": (
+                player_count == room.max_players
+                and player_count >= 2
+                and len(consents_by_room.get(room.id, set())) == player_count
+                and room.host_user_id in consents_by_room.get(room.id, set())
+                and game_status is None
+            ),
         }
         for room, host_username, player_count, game_status, viewer_is_seated in rows
     ]
+
+
+def _start_room_game(
+    db: Session,
+    room: models.PracticeRoom,
+    seats: list[models.PracticeRoomSeat] | None = None,
+) -> None:
+    if seats is None:
+        seats = db.scalars(
+            select(models.PracticeRoomSeat)
+            .where(models.PracticeRoomSeat.room_id == room.id)
+            .order_by(models.PracticeRoomSeat.seat_number)
+        ).all()
+    player_ids = [seat.user_id for seat in seats]
+    if room.game_id == "draughts":
+        state = draughts.initial_state(player_ids[0], player_ids[1])
+        game = models.DraughtsGame(
+            room_id=room.id,
+            red_player_id=player_ids[0],
+            black_player_id=player_ids[1],
+            state=state,
+        )
+        db.add(game)
+        db.flush()
+        db.add(
+            models.PracticeGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={"game_id": "draughts"},
+                state=state,
+            )
+        )
+    elif room.game_id == "chess":
+        state = chess_game.initial_state(player_ids[0], player_ids[1])
+        game = models.ChessGame(
+            room_id=room.id,
+            white_player_id=player_ids[0],
+            black_player_id=player_ids[1],
+            state=state,
+        )
+        db.add(game)
+        db.flush()
+        db.add(
+            models.ChessGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={"game_id": "chess"},
+                state=state,
+            )
+        )
+    elif room.game_id == "golf":
+        state = golf.initial_state(player_ids)
+        game = models.GolfGame(room_id=room.id, state=state)
+        db.add(game)
+        db.flush()
+        db.add(
+            models.GolfGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={"game_id": "golf", "players": player_ids},
+                state=state,
+            )
+        )
+    elif room.game_id == "polo":
+        state = polo.initial_state(player_ids)
+        game = models.PoloGame(room_id=room.id, state=state)
+        db.add(game)
+        db.flush()
+        db.add(
+            models.PoloGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={"game_id": "polo", "teams": player_ids},
+                state=state,
+            )
+        )
+    elif room.game_id == "snooker":
+        state = snooker.initial_state(player_ids)
+        game = models.SnookerGame(room_id=room.id, state=state)
+        db.add(game)
+        db.flush()
+        db.add(
+            models.SnookerGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={"game_id": "snooker", "players": player_ids},
+                state=state,
+            )
+        )
+    elif room.game_id == "ludo":
+        server_seed = fair_dice.new_server_seed()
+        state = ludo.initial_state(player_ids)
+        state["_fairness"] = {
+            "server_seed": server_seed,
+            "server_seed_hash": fair_dice.server_seed_commitment(server_seed),
+        }
+        game = models.LudoGame(room_id=room.id, state=state)
+        db.add(game)
+        db.flush()
+        db.add(
+            models.LudoGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={
+                    "game_id": "ludo",
+                    "server_seed_hash": state["_fairness"]["server_seed_hash"],
+                },
+                state=state,
+            )
+        )
+    else:
+        state = whot.initial_state(player_ids)
+        game = models.WhotGame(room_id=room.id, state=state)
+        db.add(game)
+        db.flush()
+        db.add(
+            models.WhotGameEvent(
+                game_id=game.id,
+                sequence=0,
+                actor_user_id=None,
+                event_type="game_started",
+                payload={"game_id": "whot"},
+                state=state,
+            )
+        )
 
 
 @app.post("/rooms", status_code=201)
@@ -1861,6 +2035,13 @@ def create_practice_room(
             seat_number=1,
         )
     )
+    if body.allow_predictions:
+        db.add(
+            models.RoomPredictionConsent(
+                room_id=room.id,
+                user_id=user.id,
+            )
+        )
     db.commit()
     return {"id": room.id, "name": room.name, "game_id": room.game_id}
 
@@ -1870,6 +2051,7 @@ async def join_practice_room(
     room_id: int,
     user: models.User = Depends(current_user),
     db: Session = Depends(get_db),
+    prediction_opt_in: bool = False,
 ):
     room = db.get(models.PracticeRoom, room_id)
     if not room:
@@ -1883,6 +2065,13 @@ async def join_practice_room(
     )
     if existing_seat:
         raise HTTPException(409, "You are already in this room")
+
+    host_opted_in = db.get(
+        models.RoomPredictionConsent,
+        (room.id, room.host_user_id),
+    ) is not None
+    if prediction_opt_in and not host_opted_in:
+        raise HTTPException(409, "The room host has not enabled predictions")
 
     player_count = db.scalar(
         select(func.count(models.PracticeRoomSeat.id)).where(
@@ -1899,144 +2088,34 @@ async def join_practice_room(
             seat_number=player_count + 1,
         )
     )
+    if prediction_opt_in:
+        db.add(
+            models.RoomPredictionConsent(
+                room_id=room.id,
+                user_id=user.id,
+            )
+        )
+    db.flush()
     player_total = player_count + 1
-    game_started = (
+    game_should_start = (
         room.game_id in {"draughts", "chess"} and player_total == 2
     ) or (
         room.game_id in {"ludo", "whot", "golf", "polo", "snooker"}
         and player_total == room.max_players
     )
+    consent_count = db.scalar(
+        select(func.count(models.RoomPredictionConsent.user_id)).where(
+            models.RoomPredictionConsent.room_id == room.id
+        )
+    )
+    prediction_lobby = (
+        game_should_start
+        and host_opted_in
+        and consent_count == player_total
+    )
+    game_started = game_should_start and not prediction_lobby
     if game_started:
-        db.flush()
-        seats = db.scalars(
-            select(models.PracticeRoomSeat)
-            .where(models.PracticeRoomSeat.room_id == room.id)
-            .order_by(models.PracticeRoomSeat.seat_number)
-        ).all()
-        if room.game_id == "draughts":
-            state = draughts.initial_state(seats[0].user_id, seats[1].user_id)
-            game = models.DraughtsGame(
-                room_id=room.id,
-                red_player_id=seats[0].user_id,
-                black_player_id=seats[1].user_id,
-                state=state,
-            )
-            db.add(game)
-            db.flush()
-            db.add(
-                models.PracticeGameEvent(
-                    game_id=game.id,
-                    sequence=0,
-                    actor_user_id=None,
-                    event_type="game_started",
-                    payload={"game_id": "draughts"},
-                    state=state,
-                )
-            )
-        elif room.game_id == "chess":
-            state = chess_game.initial_state(seats[0].user_id, seats[1].user_id)
-            game = models.ChessGame(
-                room_id=room.id,
-                white_player_id=seats[0].user_id,
-                black_player_id=seats[1].user_id,
-                state=state,
-            )
-            db.add(game)
-            db.flush()
-            db.add(
-                models.ChessGameEvent(
-                    game_id=game.id,
-                    sequence=0,
-                    actor_user_id=None,
-                    event_type="game_started",
-                    payload={"game_id": "chess"},
-                    state=state,
-                )
-            )
-        elif room.game_id == "golf":
-            state = golf.initial_state([seat.user_id for seat in seats])
-            game = models.GolfGame(room_id=room.id, state=state)
-            db.add(game)
-            db.flush()
-            db.add(
-                models.GolfGameEvent(
-                    game_id=game.id,
-                    sequence=0,
-                    actor_user_id=None,
-                    event_type="game_started",
-                    payload={"game_id": "golf", "players": [seat.user_id for seat in seats]},
-                    state=state,
-                )
-            )
-        elif room.game_id == "polo":
-            state = polo.initial_state([seat.user_id for seat in seats])
-            game = models.PoloGame(room_id=room.id, state=state)
-            db.add(game)
-            db.flush()
-            db.add(
-                models.PoloGameEvent(
-                    game_id=game.id,
-                    sequence=0,
-                    actor_user_id=None,
-                    event_type="game_started",
-                    payload={"game_id": "polo", "teams": [seat.user_id for seat in seats]},
-                    state=state,
-                )
-            )
-        elif room.game_id == "snooker":
-            state = snooker.initial_state([seat.user_id for seat in seats])
-            game = models.SnookerGame(room_id=room.id, state=state)
-            db.add(game)
-            db.flush()
-            db.add(
-                models.SnookerGameEvent(
-                    game_id=game.id,
-                    sequence=0,
-                    actor_user_id=None,
-                    event_type="game_started",
-                    payload={"game_id": "snooker", "players": [seat.user_id for seat in seats]},
-                    state=state,
-                )
-            )
-        else:
-            if room.game_id == "ludo":
-                server_seed = fair_dice.new_server_seed()
-                state = ludo.initial_state([seat.user_id for seat in seats])
-                state["_fairness"] = {
-                    "server_seed": server_seed,
-                    "server_seed_hash": fair_dice.server_seed_commitment(server_seed),
-                }
-                game = models.LudoGame(room_id=room.id, state=state)
-                db.add(game)
-                db.flush()
-                db.add(
-                    models.LudoGameEvent(
-                        game_id=game.id,
-                        sequence=0,
-                        actor_user_id=None,
-                        event_type="game_started",
-                        payload={
-                            "game_id": "ludo",
-                            "server_seed_hash": state["_fairness"]["server_seed_hash"],
-                        },
-                        state=state,
-                    )
-                )
-            else:
-                state = whot.initial_state([seat.user_id for seat in seats])
-                game = models.WhotGame(room_id=room.id, state=state)
-                db.add(game)
-                db.flush()
-                db.add(
-                    models.WhotGameEvent(
-                        game_id=game.id,
-                        sequence=0,
-                        actor_user_id=None,
-                        event_type="game_started",
-                        payload={"game_id": "whot"},
-                        state=state,
-                    )
-                )
+        _start_room_game(db, room)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -2049,7 +2128,298 @@ async def join_practice_room(
         "players": player_count + 1,
         "max_players": room.max_players,
         "game_started": game_started,
+        "awaiting_host_start": prediction_lobby,
     }
+
+
+def _room_prediction_ready(room: models.PracticeRoom, db: Session) -> tuple[bool, list[int]]:
+    seats = db.scalars(
+        select(models.PracticeRoomSeat)
+        .where(models.PracticeRoomSeat.room_id == room.id)
+        .order_by(models.PracticeRoomSeat.seat_number)
+    ).all()
+    seat_user_ids = [seat.user_id for seat in seats]
+    consented_user_ids = set(db.scalars(
+        select(models.RoomPredictionConsent.user_id).where(
+            models.RoomPredictionConsent.room_id == room.id
+        )
+    ).all())
+    return (
+        len(seat_user_ids) == room.max_players
+        and room.host_user_id in consented_user_ids
+        and set(seat_user_ids) == consented_user_ids,
+        seat_user_ids,
+    )
+
+
+@app.post("/rooms/{room_id}/start")
+async def start_prediction_room(
+    room_id: int,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    room = db.scalar(
+        select(models.PracticeRoom)
+        .where(models.PracticeRoom.id == room_id)
+        .with_for_update()
+    )
+    if not room:
+        raise HTTPException(404, "Practice room not found")
+    if room.host_user_id != user.id:
+        raise HTTPException(403, "Only the room host can start this match")
+    prediction_ready, _ = _room_prediction_ready(room, db)
+    if not prediction_ready:
+        raise HTTPException(
+            409,
+            "All players must opt in and the room must be full before the host can start",
+        )
+    game_model = PREDICTION_GAME_MODELS[room.game_id]
+    if db.scalar(
+        select(game_model.id).where(game_model.room_id == room.id).limit(1)
+    ) is not None:
+        raise HTTPException(409, "This match has already started")
+
+    try:
+        _start_room_game(db, room)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "This match has already started") from exc
+    await room_updates.publish(room.id, 0)
+    return {"room_id": room.id, "game_started": True}
+
+
+def _completed_prediction_results(
+    db: Session,
+    rooms_by_id: dict[int, models.PracticeRoom],
+    room_ids: set[int],
+) -> dict[int, set[int]]:
+    results: dict[int, set[int]] = {}
+    for game_id, game_model in PREDICTION_GAME_MODELS.items():
+        matching_room_ids = [
+            room_id for room_id in room_ids
+            if rooms_by_id.get(room_id) and rooms_by_id[room_id].game_id == game_id
+        ]
+        if not matching_room_ids:
+            continue
+        games = db.scalars(
+            select(game_model).where(
+                game_model.room_id.in_(matching_room_ids),
+                game_model.status == "finished",
+            )
+        ).all()
+        for game in games:
+            state = game.state
+            if state.get("status") != "finished":
+                continue
+            winner_user_ids = state.get("winner_user_ids")
+            if winner_user_ids is None:
+                winner_user_id = state.get("winner_user_id")
+                winner_user_ids = [] if winner_user_id is None else [winner_user_id]
+            results[game.room_id] = set(winner_user_ids)
+    return results
+
+
+@app.get("/predictions")
+def get_predictions(
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    room_summaries = practice_rooms(None, db, None)
+    ready_rooms = [
+        room for room in room_summaries
+        if room["prediction_ready"] and not room["viewer_is_seated"]
+    ]
+    market_room_ids = [room["id"] for room in ready_rooms]
+    participants_by_room: dict[int, list[dict]] = {}
+    if market_room_ids:
+        participant_rows = db.execute(
+            select(
+                models.PracticeRoomSeat.room_id,
+                models.User.id,
+                models.User.username,
+                models.User.display_name,
+            )
+            .join(models.User, models.User.id == models.PracticeRoomSeat.user_id)
+            .where(models.PracticeRoomSeat.room_id.in_(market_room_ids))
+            .order_by(
+                models.PracticeRoomSeat.room_id,
+                models.PracticeRoomSeat.seat_number,
+            )
+        ).all()
+        for room_id, player_id, username, display_name in participant_rows:
+            participants_by_room.setdefault(room_id, []).append({
+                "id": player_id,
+                "username": username,
+                "display_name": display_name or username,
+            })
+
+    predictions_by_room: dict[int, models.MatchPrediction] = {}
+    prediction_counts: dict[int, int] = {}
+    if market_room_ids:
+        predictions = db.scalars(
+            select(models.MatchPrediction).where(
+                models.MatchPrediction.room_id.in_(market_room_ids)
+            )
+        ).all()
+        for prediction in predictions:
+            prediction_counts[prediction.room_id] = (
+                prediction_counts.get(prediction.room_id, 0) + 1
+            )
+            if prediction.user_id == user.id:
+                predictions_by_room[prediction.room_id] = prediction
+
+    markets = []
+    for room in ready_rooms:
+        if user.id in {
+            player["id"] for player in participants_by_room.get(room["id"], [])
+        }:
+            continue
+        prediction = predictions_by_room.get(room["id"])
+        markets.append({
+            "room_id": room["id"],
+            "room_name": room["name"],
+            "game_id": room["game_id"],
+            "players": participants_by_room.get(room["id"], []),
+            "prediction_count": prediction_counts.get(room["id"], 0),
+            "my_prediction": (
+                {
+                    "predicted_winner_user_id": prediction.predicted_winner_user_id,
+                    "predicts_draw": prediction.predicts_draw,
+                }
+                if prediction else None
+            ),
+        })
+
+    user_predictions = db.scalars(
+        select(models.MatchPrediction)
+        .where(models.MatchPrediction.user_id == user.id)
+        .order_by(models.MatchPrediction.updated_at.desc())
+    ).all()
+    history_room_ids = {prediction.room_id for prediction in user_predictions}
+    history_rooms = db.scalars(
+        select(models.PracticeRoom).where(
+            models.PracticeRoom.id.in_(history_room_ids)
+        )
+    ).all() if history_room_ids else []
+    history_rooms_by_id = {room.id: room for room in history_rooms}
+    results_by_room = _completed_prediction_results(
+        db, history_rooms_by_id, history_room_ids
+    )
+    outcome_user_ids = {
+        prediction.predicted_winner_user_id
+        for prediction in user_predictions
+        if prediction.predicted_winner_user_id is not None
+    }
+    for winners in results_by_room.values():
+        outcome_user_ids.update(winners)
+    outcome_users = db.scalars(
+        select(models.User).where(models.User.id.in_(outcome_user_ids))
+    ).all() if outcome_user_ids else []
+    names_by_user_id = {
+        player.id: player.display_name or player.username
+        for player in outcome_users
+    }
+
+    history = []
+    total_points = 0
+    for prediction in user_predictions:
+        room = history_rooms_by_id.get(prediction.room_id)
+        winners = results_by_room.get(prediction.room_id)
+        is_correct = None
+        if winners is not None:
+            is_correct = (
+                len(winners) != 1
+                if prediction.predicts_draw
+                else winners == {prediction.predicted_winner_user_id}
+            )
+            total_points += int(is_correct)
+        winner_names = [names_by_user_id[player_id] for player_id in sorted(winners or set())]
+        history.append({
+            "room_id": prediction.room_id,
+            "room_name": room.name if room else "Practice match",
+            "game_id": room.game_id if room else "unknown",
+            "outcome": (
+                "Draw / tie"
+                if prediction.predicts_draw
+                else names_by_user_id.get(prediction.predicted_winner_user_id, "Unknown player")
+            ),
+            "result": (
+                "Draw / tie" if not winner_names
+                else ", ".join(winner_names)
+            ) if winners is not None else None,
+            "status": (
+                "pending" if winners is None
+                else "correct" if is_correct
+                else "incorrect"
+            ),
+            "points": int(is_correct) if is_correct is not None else 0,
+            "updated_at": prediction.updated_at,
+        })
+
+    return {
+        "points": total_points,
+        "prediction_count": len(user_predictions),
+        "markets": markets,
+        "recent_predictions": history[:20],
+    }
+
+
+@app.post("/predictions/{room_id}")
+def submit_prediction(
+    room_id: int,
+    body: PredictionSubmission,
+    user: models.User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    room = db.scalar(
+        select(models.PracticeRoom)
+        .where(models.PracticeRoom.id == room_id)
+        .with_for_update()
+    )
+    if not room:
+        raise HTTPException(404, "Practice room not found")
+    is_ready, seat_user_ids = _room_prediction_ready(room, db)
+    game_model = PREDICTION_GAME_MODELS[room.game_id]
+    match_started = db.scalar(
+        select(game_model.id).where(game_model.room_id == room.id).limit(1)
+    ) is not None
+    if not is_ready or match_started:
+        raise HTTPException(409, "Predictions are closed for this match")
+    if user.id in seat_user_ids:
+        raise HTTPException(403, "Players in this match cannot predict its outcome")
+    if body.predicts_draw == (body.predicted_winner_user_id is not None):
+        raise HTTPException(422, "Choose either one winner or a draw")
+    if (
+        body.predicted_winner_user_id is not None
+        and body.predicted_winner_user_id not in seat_user_ids
+    ):
+        raise HTTPException(422, "Choose a player in this match")
+
+    prediction = db.scalar(
+        select(models.MatchPrediction).where(
+            models.MatchPrediction.room_id == room.id,
+            models.MatchPrediction.user_id == user.id,
+        )
+    )
+    if prediction is None:
+        prediction = models.MatchPrediction(
+            room_id=room.id,
+            user_id=user.id,
+            predicted_winner_user_id=body.predicted_winner_user_id,
+            predicts_draw=body.predicts_draw,
+        )
+        db.add(prediction)
+    else:
+        prediction.predicted_winner_user_id = body.predicted_winner_user_id
+        prediction.predicts_draw = body.predicts_draw
+        prediction.updated_at = models.now()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Your prediction could not be saved; refresh and try again") from exc
+    return {"room_id": room.id, "saved": True}
 
 
 @app.get("/rooms/{room_id}/game")

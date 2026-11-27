@@ -1,7 +1,17 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -67,6 +77,36 @@ class PracticeRoomSeat(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     seat_number: Mapped[int] = mapped_column(Integer)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class RoomPredictionConsent(Base):
+    __tablename__ = "room_prediction_consents"
+    room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class MatchPrediction(Base):
+    __tablename__ = "match_predictions"
+    __table_args__ = (
+        UniqueConstraint("room_id", "user_id"),
+        CheckConstraint(
+            "(predicts_draw AND predicted_winner_user_id IS NULL) OR "
+            "(NOT predicts_draw AND predicted_winner_user_id IS NOT NULL)",
+            name="ck_match_predictions_outcome",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    predicted_winner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    predicts_draw: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class PracticeRoomMessage(Base):

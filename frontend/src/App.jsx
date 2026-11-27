@@ -1337,6 +1337,7 @@ function NavigationIcon({ name }) {
     home: <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V10Z" />,
     games: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
     play: <path d="M8 5.5v13l10-6.5-10-6.5Z" />,
+    predict: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /><path d="M12 2v3M22 12h-3M12 22v-3M2 12h3" /></>,
     profile: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
   };
   return (
@@ -1352,6 +1353,233 @@ function NavigationIcon({ name }) {
     >
       {paths[name]}
     </svg>
+  );
+}
+
+function PredictionWorkspace({ session, games, onLogin }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [selections, setSelections] = useState({});
+  const [savingRoom, setSavingRoom] = useState(null);
+
+  useEffect(() => {
+    if (!session) {
+      setData(null);
+      setLoading(false);
+      setError("");
+      return undefined;
+    }
+
+    let stopped = false;
+    let refreshing = false;
+    const refresh = async (silent = false) => {
+      if (refreshing) return;
+      refreshing = true;
+      if (!silent) setLoading(true);
+      try {
+        const latest = await api.getPredictions(session.token);
+        if (!stopped) {
+          setData(latest);
+          setError("");
+          setSelections((current) => {
+            const next = { ...current };
+            latest.markets.forEach((market) => {
+              if (next[market.room_id] !== undefined || !market.my_prediction) return;
+              next[market.room_id] = market.my_prediction.predicts_draw
+                ? "draw"
+                : String(market.my_prediction.predicted_winner_user_id);
+            });
+            return next;
+          });
+        }
+      } catch (requestError) {
+        if (!stopped) setError(requestError.message);
+      } finally {
+        refreshing = false;
+        if (!stopped && !silent) setLoading(false);
+      }
+    };
+
+    void refresh();
+    const refreshTimer = window.setInterval(() => void refresh(true), 15000);
+    return () => {
+      stopped = true;
+      window.clearInterval(refreshTimer);
+    };
+  }, [session?.token]);
+
+  async function savePrediction(market) {
+    const selection = selections[market.room_id];
+    if (!selection) {
+      setError("Choose a player or a draw before saving your prediction.");
+      return;
+    }
+    setSavingRoom(market.room_id);
+    setError("");
+    setMessage("");
+    try {
+      const prediction = selection === "draw"
+        ? { predicts_draw: true, predicted_winner_user_id: null }
+        : { predicts_draw: false, predicted_winner_user_id: Number(selection) };
+      await api.submitPrediction(session.token, market.room_id, prediction);
+      setMessage(`Your prediction for "${market.room_name}" was saved.`);
+      setData((current) => current && ({
+        ...current,
+        markets: current.markets.map((currentMarket) => (
+          currentMarket.room_id === market.room_id
+            ? {
+              ...currentMarket,
+              my_prediction: prediction,
+              prediction_count: currentMarket.my_prediction
+                ? currentMarket.prediction_count
+                : currentMarket.prediction_count + 1,
+            }
+            : currentMarket
+        )),
+      }));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSavingRoom(null);
+    }
+  }
+
+  const gameNames = Object.fromEntries(games.map((game) => [game.id, game.name]));
+
+  return (
+    <section className="predictions-section" id="predictions">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">PREDICT FOR FUN</p>
+          <h2>Free predictions</h2>
+        </div>
+        <p className="section-note">Earn points for correct picks. Points have no cash value.</p>
+      </div>
+      {!session ? (
+        <div className="card prediction-empty">
+          <p>Sign in to predict match outcomes and track your points.</p>
+          <ActionButton className="btn" onClick={onLogin}>Log in or sign up</ActionButton>
+        </div>
+      ) : (
+        <>
+          <div className="prediction-summary">
+            <div className="prediction-points">
+              <span>Your prediction points</span>
+              <strong>{data?.points ?? 0}</strong>
+            </div>
+            <p>One point for a correct result. No stakes, purchases, cash-outs, or prizes.</p>
+            <ActionButton
+              className="link"
+              onClick={() => api.getPredictions(session.token)
+                .then(setData)
+                .catch((requestError) => setError(requestError.message))}
+              disabled={loading}
+            >
+              Refresh
+            </ActionButton>
+          </div>
+          {error && <p className="error prediction-feedback" role="alert">{error}</p>}
+          {message && <p className="success prediction-feedback" role="status">{message}</p>}
+          {loading && !data ? (
+            <p className="login-prompt" role="status">Loading predictions...</p>
+          ) : data?.markets.length ? (
+            <div className="grid prediction-grid">
+              {data.markets.map((market) => {
+                const selected = selections[market.room_id] || "";
+                const gameName = gameNames[market.game_id] || market.game_id;
+                return (
+                  <article className="card prediction-card" key={market.room_id}>
+                    <div className="prediction-card-heading">
+                      <div>
+                        <span className="prediction-game">{gameName}</span>
+                        <h3>{market.room_name}</h3>
+                      </div>
+                      <span className="prediction-count">{market.prediction_count} picks</span>
+                    </div>
+                    <p className="prediction-players">
+                      {market.players.map((player) => player.display_name).join(" vs ")}
+                    </p>
+                    <fieldset>
+                      <legend>Who will win?</legend>
+                      {market.players.map((player) => (
+                        <label
+                          className={`prediction-option${selected === String(player.id) ? " selected" : ""}`}
+                          key={player.id}
+                        >
+                          <input
+                            type="radio"
+                            name={`prediction-${market.room_id}`}
+                            value={player.id}
+                            checked={selected === String(player.id)}
+                            onChange={() => setSelections((current) => ({
+                              ...current,
+                              [market.room_id]: String(player.id),
+                            }))}
+                          />
+                          <span>{player.display_name}</span>
+                        </label>
+                      ))}
+                      <label className={`prediction-option${selected === "draw" ? " selected" : ""}`}>
+                        <input
+                          type="radio"
+                          name={`prediction-${market.room_id}`}
+                          value="draw"
+                          checked={selected === "draw"}
+                          onChange={() => setSelections((current) => ({
+                            ...current,
+                            [market.room_id]: "draw",
+                          }))}
+                        />
+                        <span>Draw / tie</span>
+                      </label>
+                    </fieldset>
+                    <p className="prediction-lock-note">
+                      All players opted in. Picks close when the host starts the match.
+                    </p>
+                    <ActionButton
+                      className="btn prediction-submit"
+                      onClick={() => savePrediction(market)}
+                      disabled={savingRoom === market.room_id || !selected}
+                      loading={savingRoom === market.room_id}
+                    >
+                      {market.my_prediction ? "Update prediction" : "Save prediction"}
+                    </ActionButton>
+                  </article>
+                );
+              })}
+            </div>
+          ) : data && !error ? (
+            <p className="empty-state">
+              No matches are ready for predictions. They appear here when everyone in a full room opts in.
+            </p>
+          ) : null}
+          {data?.recent_predictions.length > 0 && (
+            <div className="prediction-history">
+              <h3>Your recent predictions</h3>
+              <div className="prediction-history-list">
+                {data.recent_predictions.map((prediction) => (
+                  <article className="prediction-history-item" key={prediction.room_id}>
+                    <div>
+                      <strong>{gameNames[prediction.game_id] || prediction.game_id}: {prediction.room_name}</strong>
+                      <span>Your pick: {prediction.outcome}</span>
+                      {prediction.result && <span>Result: {prediction.result}</span>}
+                    </div>
+                    <div className={`prediction-result ${prediction.status}`}>
+                      <span>{prediction.status === "pending"
+                        ? "Awaiting result"
+                        : prediction.status === "correct" ? "Correct" : "Not correct"}</span>
+                      {prediction.status !== "pending" && <strong>+{prediction.points} pt</strong>}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -2886,6 +3114,7 @@ const GAME_DESCRIPTIONS = {
 
 const ROOM_AVAILABILITY_LABELS = {
   waiting: "Waiting for players",
+  ready: "Ready to start",
   full: "Full",
   "in-progress": "In progress",
   completed: "Completed",
@@ -3093,6 +3322,8 @@ function HomeApp() {
   const [roomSearch, setRoomSearch] = useState("");
   const [roomAvailabilityFilter, setRoomAvailabilityFilter] = useState("all");
   const [roomGameFilter, setRoomGameFilter] = useState("all");
+  const [roomPredictionOptIns, setRoomPredictionOptIns] = useState({});
+  const [allowRoomPredictions, setAllowRoomPredictions] = useState(false);
   const [hostApplication, setHostApplication] = useState(null);
   const [hostApplicationLoading, setHostApplicationLoading] = useState(false);
   const [breakReminderMinutes, setBreakReminderMinutes] = useState(60);
@@ -3483,8 +3714,10 @@ function HomeApp() {
         game_id: gameId,
         name: roomName,
         max_players: maxPlayers,
+        allow_predictions: allowRoomPredictions,
       });
       setRoomName("");
+      setAllowRoomPredictions(false);
       await reloadRooms();
       setNotice(`Practice room "${room.name}" created.`);
     } catch (err) {
@@ -3498,13 +3731,35 @@ function HomeApp() {
     setBusyRoom(room.id);
     setNotice("");
     try {
-      const result = await api.joinPracticeRoom(session.token, room.id);
+      const predictionOptIn = Boolean(roomPredictionOptIns[room.id]);
+      const result = await api.joinPracticeRoom(session.token, room.id, predictionOptIn);
+      setRoomPredictionOptIns((current) => {
+        const next = { ...current };
+        delete next[room.id];
+        return next;
+      });
       await reloadRooms();
       if (result.game_started) {
         await openGame(room);
+      } else if (result.awaiting_host_start) {
+        setNotice("Everyone opted in. The match is ready; the host will start it when predictions are complete.");
       } else {
         setNotice(`You joined "${room.name}" (${result.players}/${result.max_players} players).`);
       }
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setBusyRoom(null);
+    }
+  }
+
+  async function startPredictionMatch(room) {
+    setBusyRoom(room.id);
+    setNotice("");
+    try {
+      await api.startPredictionRoom(session.token, room.id);
+      await reloadRooms();
+      await openGame(room);
     } catch (err) {
       setNotice(err.message);
     } finally {
@@ -3785,6 +4040,7 @@ function HomeApp() {
           <a className="nav-anchor" href="#home">Home</a>
           <a className="nav-anchor" href="#games">Games</a>
           <a className="nav-anchor" href="#practice-rooms">Practice Rooms</a>
+          <a className="nav-anchor" href="#predictions">Predictions</a>
         </div>
         <div className="nav-links">
           {session ? (
@@ -3824,6 +4080,10 @@ function HomeApp() {
           <NavigationIcon name="play" />
           <small>Play</small>
         </button>
+        <a href="#predictions" aria-label="Predictions">
+          <NavigationIcon name="predict" />
+          <small>Predict</small>
+        </a>
         <button type="button" onClick={openProfile} aria-label="Profile">
           <NavigationIcon name="profile" />
           <small>Profile</small>
@@ -4083,6 +4343,12 @@ function HomeApp() {
         />
       )}
 
+      <PredictionWorkspace
+        session={session}
+        games={games}
+        onLogin={() => setMode("signup")}
+      />
+
       <section className="rooms-section" id="practice-rooms">
         <div className="section-heading">
           <div>
@@ -4142,6 +4408,14 @@ function HomeApp() {
                 {playerOptions.map((count) => <option key={count} value={count}>{count} players</option>)}
               </select>
             </label>
+            <label className="room-prediction-toggle">
+              <input
+                type="checkbox"
+                checked={allowRoomPredictions}
+                onChange={(event) => setAllowRoomPredictions(event.target.checked)}
+              />
+              <span>List this match for free predictions. Every player must opt in; points have no cash value.</span>
+            </label>
             <ActionButton className="btn" type="submit" loading={creatingRoom}>
               {creatingRoom ? "Creating..." : "Create room"}
             </ActionButton>
@@ -4182,6 +4456,7 @@ function HomeApp() {
             >
               <option value="all">All rooms</option>
               <option value="waiting">Waiting for players</option>
+              <option value="ready">Ready to start</option>
               <option value="full">Full</option>
               <option value="in-progress">In progress</option>
               <option value="completed">Completed</option>
@@ -4241,8 +4516,37 @@ function HomeApp() {
                       {busyRoom === room.id ? "Joining..." : "Join Room"}
                     </ActionButton>
                   )}
-                  {session && room.viewer_is_seated && availability === "waiting" && (
-                    <p className="room-unavailable">You’re in. Waiting for more players.</p>
+                  {session && room.viewer_is_seated && room.game_status === "not_started" && (
+                    <p className="room-unavailable">
+                      {room.prediction_ready
+                        ? "Everyone opted in. Predictions are open until the host starts."
+                        : room.viewer_prediction_opted_in
+                          ? "You opted in. Waiting for the room to fill."
+                          : "You’re in. Waiting for more players."}
+                    </p>
+                  )}
+                  {session && room.prediction_ready && room.host === session.username && (
+                    <ActionButton
+                      className="btn room-join"
+                      onClick={() => startPredictionMatch(room)}
+                      disabled={busyRoom === room.id}
+                      loading={busyRoom === room.id}
+                    >
+                      Start match
+                    </ActionButton>
+                  )}
+                  {session && room.prediction_opt_in_available && !room.viewer_is_seated && (
+                    <label className="room-prediction-toggle">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(roomPredictionOptIns[room.id])}
+                        onChange={(event) => setRoomPredictionOptIns((current) => ({
+                          ...current,
+                          [room.id]: event.target.checked,
+                        }))}
+                      />
+                      <span>Include this match in free predictions (no-cash points)</span>
+                    </label>
                   )}
                   {!session && availability === "waiting" && (
                     <p className="room-unavailable">Log in to join this room.</p>
