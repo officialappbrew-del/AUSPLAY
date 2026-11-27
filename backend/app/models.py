@@ -65,6 +65,7 @@ class PracticeRoom(Base):
     name: Mapped[str] = mapped_column(String(40))
     host_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     max_players: Mapped[int] = mapped_column(Integer)
+    stake_kobo: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -111,21 +112,53 @@ class MatchPrediction(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
-class VirtualCreditWallet(Base):
-    __tablename__ = "virtual_credit_wallets"
+class AdminWalletTopUp(Base):
+    __tablename__ = "admin_wallet_topups"
     __table_args__ = (
-        CheckConstraint("balance >= 0", name="ck_virtual_credit_wallet_balance"),
+        CheckConstraint("amount_kobo > 0", name="ck_admin_wallet_topup_amount"),
     )
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
-    balance: Mapped[int] = mapped_column(Integer, default=1000, server_default="1000")
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    admin_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    amount_kobo: Mapped[int] = mapped_column(Integer)
+    reference: Mapped[str] = mapped_column(String(80), unique=True)
+    reason: Mapped[str] = mapped_column(String(240))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class WalletWithdrawal(Base):
+    __tablename__ = "wallet_withdrawals"
+    __table_args__ = (
+        CheckConstraint("amount_kobo > 0", name="ck_wallet_withdrawal_amount"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount_kobo: Mapped[int] = mapped_column(Integer)
+    bank_code: Mapped[str] = mapped_column(String(16))
+    recipient_code: Mapped[str] = mapped_column(String(80))
+    reference: Mapped[str] = mapped_column(String(80), unique=True)
+    transfer_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="processing", index=True)
+    status_detail: Mapped[str | None] = mapped_column(String(240), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PracticeMatchSettlement(Base):
+    __tablename__ = "practice_match_settlements"
+    room_id: Mapped[int] = mapped_column(
+        ForeignKey("practice_rooms.id"), primary_key=True
+    )
+    total_pot_kobo: Mapped[int] = mapped_column(Integer)
+    commission_kobo: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="settled")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class VirtualRound(Base):
     __tablename__ = "virtual_rounds"
     __table_args__ = (
-        UniqueConstraint("game_id", "source_game_id"),
         CheckConstraint("participant_count >= 2", name="ck_virtual_round_participant_count"),
         Index(
             "uq_virtual_rounds_single_open",
@@ -137,12 +170,16 @@ class VirtualRound(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     game_id: Mapped[str] = mapped_column(String(24), index=True)
-    source_game_id: Mapped[int] = mapped_column(Integer)
-    source_room_id: Mapped[int] = mapped_column(ForeignKey("practice_rooms.id"))
+    source_game_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_room_id: Mapped[int | None] = mapped_column(
+        ForeignKey("practice_rooms.id"), nullable=True
+    )
     participant_count: Mapped[int] = mapped_column(Integer)
     outcome_key: Mapped[str] = mapped_column(String(16))
     odds: Mapped[dict[str, int]] = mapped_column(JSON)
     sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    commission_kobo: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="open", index=True)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     closes_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -153,30 +190,16 @@ class VirtualBet(Base):
     __tablename__ = "virtual_bets"
     __table_args__ = (
         UniqueConstraint("round_id", "user_id"),
-        CheckConstraint("stake > 0", name="ck_virtual_bet_stake"),
-        CheckConstraint("odds_milli >= 1000", name="ck_virtual_bet_odds"),
+        CheckConstraint("stake_kobo > 0", name="ck_virtual_bet_stake"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     round_id: Mapped[int] = mapped_column(ForeignKey("virtual_rounds.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     outcome_key: Mapped[str] = mapped_column(String(16))
-    stake: Mapped[int] = mapped_column(Integer)
-    odds_milli: Mapped[int] = mapped_column(Integer)
-    payout: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stake_kobo: Mapped[int] = mapped_column(Integer)
+    payout_kobo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-
-
-class VirtualCreditTransaction(Base):
-    __tablename__ = "virtual_credit_transactions"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    round_id: Mapped[int | None] = mapped_column(
-        ForeignKey("virtual_rounds.id"), nullable=True, index=True
-    )
-    amount: Mapped[int] = mapped_column(Integer)
-    entry_type: Mapped[str] = mapped_column(String(24))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
 class PracticeRoomMessage(Base):

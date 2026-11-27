@@ -44,18 +44,36 @@ one while the player keeps their turn, and WHOT 20 chooses the next suit. Penalt
 stack; when unable to play, a player draws one card and their turn ends. Selecting a playable
 game card preselects it in room creation and filters the room list. Game updates are sent as
 version-only WebSocket notifications; each player fetches their own private snapshot, with
-polling retained while reconnecting. Practice rooms are free-only: the wallet endpoint is
-read-only, and deposits, real-money stakes, prizes, and payouts are intentionally not available. Confirm licensing,
-launch markets, and compliance requirements with qualified local counsel before enabling any
-real-money features.
+polling retained while reconnecting. Practice rooms can be free or use an optional equal
+per-player NGN stake selected by the room creator. The stake is displayed before joining and
+escrowed only when the room fills and its game starts. A sole winner receives the pot less 10%
+of losing stakes; a tie refunds each player's stake. Financial matches settle immediately when
+the game engine records a result. A later dispute does not reverse a completed payment.
 
-The Virtual Games section replays outcomes from completed AusPlay matches in 60-second
+The Virtual Games section presents outcomes from completed AusPlay matches in 60-second
 prediction rounds. Player labels are anonymous, and the stored result is revealed only after
-the round closes. Accounts receive 1,000 non-purchasable virtual credits; bets, balances, and
-payouts are kept separate from the money wallet. Credits cannot be bought, withdrawn, or
-redeemed and have no cash value. Decimal odds use add-one-smoothed outcome frequencies from
-completed matches of the same game and player count; payouts include the stake and are rounded
-down to whole credits. These are historical simulations, not live matches or financial betting.
+the round closes. A real-money round is available only after at least 10 completed matches for
+the same game and player count. If there is not enough history, a clearly labeled demo round is
+shown; demo rounds are generated for illustration, accept no NGN stakes, and are not counted as
+real match history. Existing demo records are removed when eligible real match history becomes
+available, and real results are recycled rather than replaced with more demos. Predictors share
+the losing stakes proportionally, with 10% of losing stakes
+retained as commission. If no predictor selected the result, all stakes are refunded. These are
+historical simulations, not live matches.
+Some games use player-entered scorecards; those scores are not independently verified, so
+completed-match history must not be presented as externally verified results.
+
+Wallet balances are held in integer kobo. New accounts start at NGN 0; there is no automatic
+NGN 5,000 grant. Only an administrator can top up a wallet, after verifying the funding outside
+the application. Top-ups are recorded with an audit reference and reason. Paystack is used for
+bank withdrawals; it does not currently accept player deposits. The Paystack secret must be
+configured on the backend, and the Paystack webhook must point to
+`/payments/paystack/webhook`. Keep withdrawals disabled until the Paystack account, available
+transfer balance, webhook, and supported jurisdiction are configured and verified.
+
+These features handle money and are not a substitute for legal, payment-provider, age, KYC,
+consumer-protection, or responsible-play review. Do not launch them to users until the required
+approvals, controls, and operational procedures are in place.
 
 ## Host and moderation workflow
 Players can request Host access; an administrator must approve the request before the user can
@@ -73,7 +91,7 @@ Signed-in players can choose visible-tab break reminders (30, 60, 90, or 120 min
 These reminders are optional and are not a hard play-time limit. Players can dispute a finished
 game; administrators review disputes against its recorded result version and add an outcome note.
 No identity documents or KYC information are collected. Choose an approved provider and launch
-jurisdictions before implementing KYC or any financial features.
+jurisdictions before making financial features available.
 
 ## Run the backend
 The backend reads `DATABASE_URL` from the project-root `.env` file. Copy `.env.example`
@@ -86,6 +104,7 @@ python -m venv .venv
 .venv\Scripts\activate        # Windows   (Mac/Linux: source .venv/bin/activate)
 pip install -r requirements.txt
 set SECRET_KEY=change-me      # Mac/Linux: export SECRET_KEY=change-me
+set PAYSTACK_SECRET_KEY=      # Configure only on the backend when withdrawals are enabled
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
@@ -98,12 +117,6 @@ npm install
 npm run dev
 ```
 Open http://localhost:5173
-
-## Next steps (see the product plan)
-1. Select the KYC provider and supported jurisdictions; add age/identity checks only after
-   privacy, retention, and compliance review.
-2. Only after legal and provider approval, build a tested double-entry wallet, payments,
-   stake settlement, and commission flows.
 
 Database schema changes are managed with Alembic. See [DEPLOYMENT.md](./DEPLOYMENT.md)
 for initial setup, existing-database adoption, and the migration workflow.

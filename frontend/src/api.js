@@ -89,6 +89,25 @@ export const placeVirtualBet = (token, roundId, bet) =>
     method: "POST",
     body: JSON.stringify(bet),
   }, token);
+export const getPaystackBanks = (token) => request("/payments/paystack/banks", {}, token);
+export const requestWalletWithdrawal = (token, withdrawal) =>
+  request("/wallet/withdrawals", {
+    method: "POST",
+    body: JSON.stringify(withdrawal),
+  }, token);
+export const getAdminWalletTopups = (token) => request("/admin/wallet/topups", {}, token);
+export const createAdminWalletTopup = (token, topup) =>
+  request("/admin/wallet/topups", {
+    method: "POST",
+    body: JSON.stringify(topup),
+  }, token);
+export const getAdminWalletWithdrawals = (token) =>
+  request("/admin/wallet/withdrawals", {}, token);
+export const finalizeWalletWithdrawal = (token, withdrawalId, otp) =>
+  request(`/admin/wallet/withdrawals/${withdrawalId}/finalize`, {
+    method: "POST",
+    body: JSON.stringify({ otp }),
+  }, token);
 export const getPracticeGame = (token, roomId) =>
   request(`/rooms/${roomId}/game`, {}, token);
 export const getPracticeRoomChat = (token, roomId, before) =>

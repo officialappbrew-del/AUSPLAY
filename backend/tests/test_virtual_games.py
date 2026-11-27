@@ -1,10 +1,17 @@
-import tempfile
+import asyncio
+import hashlib
+import hmac
+import json
+import os
 import unittest
 from datetime import timedelta
+from unittest.mock import patch
 
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
 
 from app import main, models
 from app.db import Base
@@ -12,10 +19,10 @@ from app.db import Base
 
 class VirtualGameTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
         self.engine = create_engine(
-            f"sqlite:///{self.temp_dir.name}/test.db",
+            "sqlite://",
             connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
         )
         Base.metadata.create_all(self.engine)
         self.session_factory = sessionmaker(bind=self.engine, autoflush=False)
@@ -23,18 +30,30 @@ class VirtualGameTests(unittest.TestCase):
             self.player_a = models.User(username="virtual_player_a", password_hash="unused")
             self.player_b = models.User(username="virtual_player_b", password_hash="unused")
             self.predictor = models.User(username="virtual_predictor", password_hash="unused")
-            db.add_all([self.player_a, self.player_b, self.predictor])
+            self.admin = models.User(
+                username="virtual_admin",
+                password_hash="unused",
+                role="admin",
+            )
+            db.add_all([self.player_a, self.player_b, self.predictor, self.admin])
             db.flush()
             self.player_a_id = self.player_a.id
             self.player_b_id = self.player_b.id
             self.predictor_id = self.predictor.id
-            for user in (self.player_a, self.player_b, self.predictor):
-                db.add(models.VirtualCreditWallet(user_id=user.id, balance=1000))
+            self.admin_id = self.admin.id
             db.commit()
 
     def tearDown(self):
         self.engine.dispose()
-        self.temp_dir.cleanup()
+
+    def _fund(self, db, user_id, amount_kobo):
+        db.add(models.LedgerEntry(
+            user_id=user_id,
+            account="available",
+            amount=amount_kobo,
+            ref=f"test-funding:{user_id}:{amount_kobo}",
+        ))
+        db.flush()
 
     def _create_completed_chess(self, db, winner, updated_at):
         room = models.PracticeRoom(
@@ -60,11 +79,12 @@ class VirtualGameTests(unittest.TestCase):
                 room_id=room.id,
                 white_player_id=self.player_a_id,
                 black_player_id=self.player_b_id,
-                state=(
-                    {"status": "finished", "winner_user_ids": winner}
-                    if isinstance(winner, list)
-                    else {"status": "finished", "winner_user_id": winner}
-                ),
+                state={
+                    "status": "finished",
+                    "winner_user_ids": winner if isinstance(winner, list) else (
+                        [winner] if winner is not None else []
+                    ),
+                },
                 status="finished",
                 updated_at=updated_at,
             ),
@@ -72,167 +92,296 @@ class VirtualGameTests(unittest.TestCase):
         db.flush()
         return room.id
 
-    def _seed_two_history_rows(self, db):
+    def _seed_completed_chess(self, db, count=10, winner=None):
+        winner = self.player_a_id if winner is None else winner
         now = models.now()
-        self._create_completed_chess(
-            db,
-            self.player_a_id,
-            now - timedelta(days=2),
-        )
-        self._create_completed_chess(
-            db,
-            self.player_b_id,
-            now - timedelta(days=1),
-        )
+        for index in range(count):
+            self._create_completed_chess(
+                db,
+                winner,
+                now - timedelta(days=count - index),
+            )
         db.commit()
 
-    def test_round_uses_completed_match_and_hides_result_and_player_identity(self):
+    def _open_round(self, db, user_id=None):
+        player = db.get(models.User, user_id or self.predictor_id)
+        return main.get_virtual_games(player, db)["active_round"]
+
+    def test_accounts_start_with_zero_balance_and_demo_round_rejects_stakes(self):
         with self.session_factory() as db:
-            self._seed_two_history_rows(db)
-            feed = main.get_virtual_games(
+            feed = main.get_virtual_games(db.get(models.User, self.predictor_id), db)
+            round_data = feed["active_round"]
+            balance = main._wallet_balance(db, self.predictor_id)
+            with self.assertRaises(HTTPException) as result:
+                main.place_virtual_bet(
+                    round_data["id"],
+                    main.VirtualBetSubmission(
+                        outcome_key="player_1",
+                        stake_kobo=100,
+                    ),
+                    db.get(models.User, self.predictor_id),
+                    db,
+                )
+
+        self.assertEqual(balance, 0)
+        self.assertTrue(round_data["is_demo"])
+        self.assertEqual(result.exception.status_code, 409)
+
+    def test_requires_ten_completed_matches_for_real_money_round(self):
+        with self.session_factory() as db:
+            self._seed_completed_chess(db, count=9)
+            round_data = self._open_round(db)
+
+        self.assertTrue(round_data["is_demo"])
+        self.assertEqual(round_data["sample_size"], 0)
+
+    def test_real_history_replaces_demos_and_recycles_without_creating_more(self):
+        with self.session_factory() as db:
+            demo_round = self._open_round(db)
+            self.assertTrue(demo_round["is_demo"])
+            self._seed_completed_chess(db, count=10)
+
+            round_data = self._open_round(db)
+            self.assertFalse(round_data["is_demo"])
+            for _ in range(11):
+                current = db.get(models.VirtualRound, round_data["id"])
+                current.closes_at = models.now() - timedelta(seconds=1)
+                db.commit()
+                round_data = self._open_round(db)
+                self.assertFalse(round_data["is_demo"])
+
+            demo_count = db.scalar(
+                select(func.count(models.VirtualRound.id)).where(
+                    models.VirtualRound.is_demo.is_(True)
+                )
+            )
+            real_rounds = db.scalars(
+                select(models.VirtualRound).where(models.VirtualRound.is_demo.is_(False))
+            ).all()
+
+        self.assertEqual(demo_count or 0, 0)
+        self.assertGreater(len(real_rounds), 10)
+
+    def test_pooled_prediction_pays_winner_and_records_ten_percent_commission_once(self):
+        with self.session_factory() as db:
+            self._fund(db, self.predictor_id, 50000)
+            self._fund(db, self.player_b_id, 50000)
+            self._seed_completed_chess(db, count=10)
+            round_data = self._open_round(db)
+            self.assertFalse(round_data["is_demo"])
+            self.assertEqual(round_data["sample_size"], 9)
+
+            main.place_virtual_bet(
+                round_data["id"],
+                main.VirtualBetSubmission(outcome_key="player_1", stake_kobo=10000),
                 db.get(models.User, self.predictor_id),
                 db,
             )
-
-        self.assertEqual(feed["balance"], 1000)
-        self.assertEqual(feed["active_round"]["game_id"], "chess")
-        self.assertEqual(feed["active_round"]["participant_count"], 2)
-        self.assertEqual(feed["active_round"]["sample_size"], 1)
-        self.assertEqual(
-            [option["label"] for option in feed["active_round"]["options"]],
-            ["Player A", "Player B", "Draw / tie"],
-        )
-        self.assertNotIn("outcome_key", feed["active_round"])
-        self.assertNotIn("virtual_player_a", str(feed))
-        self.assertNotIn("virtual_player_b", str(feed))
-        self.assertEqual(
-            {option["key"]: option["odds_milli"] for option in feed["active_round"]["options"]},
-            {"player_1": 4000, "player_2": 2000, "draw": 4000},
-        )
-
-    def test_correct_stake_settles_once_and_never_touches_money_ledger(self):
-        with self.session_factory() as db:
-            self._seed_two_history_rows(db)
-            predictor = db.get(models.User, self.predictor_id)
-            round_data = main.get_virtual_games(predictor, db)["active_round"]
-            placed = main.place_virtual_bet(
+            main.place_virtual_bet(
                 round_data["id"],
-                main.VirtualBetSubmission(outcome_key="player_1", stake=100),
-                predictor,
+                main.VirtualBetSubmission(outcome_key="player_2", stake_kobo=20000),
+                db.get(models.User, self.player_b_id),
                 db,
             )
-            self.assertEqual(placed["balance"], 900)
             virtual_round = db.get(models.VirtualRound, round_data["id"])
             virtual_round.closes_at = models.now() - timedelta(seconds=1)
             db.commit()
 
-            first_settlement = main.get_virtual_games(predictor, db)
-            balance_after_first_settlement = first_settlement["balance"]
-            second_settlement = main.get_virtual_games(predictor, db)
+            feed = main.get_virtual_games(db.get(models.User, self.predictor_id), db)
             bet = db.scalar(
                 select(models.VirtualBet).where(
                     models.VirtualBet.round_id == round_data["id"],
                     models.VirtualBet.user_id == self.predictor_id,
                 )
             )
-            money_entries = db.scalars(select(models.LedgerEntry)).all()
+            locked_balance = main._wallet_balance(db, self.predictor_id, "locked")
+            winner_balance = main._wallet_balance(db, self.predictor_id)
+            loser_balance = main._wallet_balance(db, self.player_b_id)
 
-        self.assertEqual(balance_after_first_settlement, 1300)
-        self.assertEqual(second_settlement["balance"], 1300)
-        self.assertEqual(bet.payout, 400)
-        self.assertEqual(first_settlement["recent_bets"][0]["status"], "won")
-        self.assertEqual(money_entries, [])
+            main._settle_virtual_round(db, virtual_round)
+            db.commit()
+            winner_balance_after_repeat = main._wallet_balance(db, self.predictor_id)
+            commission_kobo = virtual_round.commission_kobo
+            payout_kobo = bet.payout_kobo
 
-    def test_replacing_a_bet_refunds_prior_stake_before_new_stake(self):
+        self.assertEqual(commission_kobo, 2000)
+        self.assertEqual(payout_kobo, 28000)
+        self.assertEqual(locked_balance, 0)
+        self.assertEqual(winner_balance, 68000)
+        self.assertEqual(loser_balance, 30000)
+        self.assertEqual(winner_balance_after_repeat, winner_balance)
+        self.assertEqual(feed["recent_bets"][0]["status"], "won")
+
+    def test_no_winning_pool_refunds_stakes_without_commission(self):
         with self.session_factory() as db:
-            self._seed_two_history_rows(db)
-            predictor = db.get(models.User, self.predictor_id)
-            round_data = main.get_virtual_games(predictor, db)["active_round"]
+            self._fund(db, self.predictor_id, 50000)
+            self._seed_completed_chess(db)
+            round_data = self._open_round(db)
             main.place_virtual_bet(
                 round_data["id"],
-                main.VirtualBetSubmission(outcome_key="player_1", stake=300),
-                predictor,
+                main.VirtualBetSubmission(outcome_key="player_2", stake_kobo=10000),
+                db.get(models.User, self.predictor_id),
                 db,
             )
-            replaced = main.place_virtual_bet(
+            virtual_round = db.get(models.VirtualRound, round_data["id"])
+            virtual_round.closes_at = models.now() - timedelta(seconds=1)
+            db.commit()
+            main.get_virtual_games(db.get(models.User, self.predictor_id), db)
+            balance = main._wallet_balance(db, self.predictor_id)
+
+        self.assertEqual(virtual_round.commission_kobo, 0)
+        self.assertEqual(balance, 50000)
+
+    def test_replacing_prediction_releases_old_stake_and_locks_new_stake(self):
+        with self.session_factory() as db:
+            self._fund(db, self.predictor_id, 50000)
+            self._seed_completed_chess(db)
+            round_data = self._open_round(db)
+            player = db.get(models.User, self.predictor_id)
+            main.place_virtual_bet(
                 round_data["id"],
-                main.VirtualBetSubmission(outcome_key="player_2", stake=200),
-                predictor,
+                main.VirtualBetSubmission(outcome_key="player_1", stake_kobo=30000),
+                player,
                 db,
             )
-            transaction_types = db.scalars(
-                select(models.VirtualCreditTransaction.entry_type)
-                .where(models.VirtualCreditTransaction.user_id == self.predictor_id)
-                .order_by(models.VirtualCreditTransaction.id)
+            main.place_virtual_bet(
+                round_data["id"],
+                main.VirtualBetSubmission(outcome_key="player_2", stake_kobo=20000),
+                player,
+                db,
+            )
+            available = main._wallet_balance(db, self.predictor_id)
+            locked = main._wallet_balance(db, self.predictor_id, "locked")
+
+        self.assertEqual(available, 30000)
+        self.assertEqual(locked, 20000)
+
+    def test_room_stake_escrow_and_settlement_apply_commission(self):
+        with self.session_factory() as db:
+            self._fund(db, self.player_a_id, 50000)
+            self._fund(db, self.player_b_id, 50000)
+            room = models.PracticeRoom(
+                game_id="chess",
+                name="Staked practice",
+                host_user_id=self.player_a_id,
+                max_players=2,
+                stake_kobo=10000,
+            )
+            db.add(room)
+            db.flush()
+            db.add_all([
+                models.PracticeRoomSeat(room_id=room.id, user_id=self.player_a_id, seat_number=1),
+                models.PracticeRoomSeat(room_id=room.id, user_id=self.player_b_id, seat_number=2),
+            ])
+            db.flush()
+            main._escrow_practice_room_stakes(db, room)
+            db.commit()
+            main._settle_practice_match(
+                db,
+                room.id,
+                {"status": "finished", "winner_user_id": self.player_a_id},
+            )
+            db.commit()
+            settlement = db.get(models.PracticeMatchSettlement, room.id)
+            winner_balance = main._wallet_balance(db, self.player_a_id)
+            loser_balance = main._wallet_balance(db, self.player_b_id)
+            locked = main._wallet_balance(db, self.player_a_id, "locked")
+
+        self.assertEqual(settlement.total_pot_kobo, 20000)
+        self.assertEqual(settlement.commission_kobo, 1000)
+        self.assertEqual(winner_balance, 59000)
+        self.assertEqual(loser_balance, 40000)
+        self.assertEqual(locked, 0)
+
+    def test_admin_topup_is_audited_and_uses_kobo(self):
+        with self.session_factory() as db:
+            result = main.admin_wallet_topup(
+                main.AdminWalletTopUpRequest(
+                    username="virtual_predictor",
+                    amount_kobo=12500,
+                    reference="verified-fund-123",
+                    reason="Verified cash transfer receipt",
+                ),
+                db.get(models.User, self.admin_id),
+                db,
+            )
+            entries = db.scalars(
+                select(models.LedgerEntry).where(
+                    models.LedgerEntry.user_id == self.predictor_id
+                )
             ).all()
 
-        self.assertEqual(replaced["balance"], 800)
-        self.assertEqual(transaction_types, ["stake", "stake_refund", "stake"])
+        self.assertEqual(result["available_kobo"], 12500)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].amount, 12500)
 
-    def test_insufficient_credit_stake_is_rejected_without_debit(self):
+    def test_paystack_withdrawal_otp_and_reversal_webhook_are_idempotent(self):
         with self.session_factory() as db:
-            self._seed_two_history_rows(db)
-            predictor = db.get(models.User, self.predictor_id)
-            round_data = main.get_virtual_games(predictor, db)["active_round"]
-            with self.assertRaises(HTTPException) as result:
-                main.place_virtual_bet(
-                    round_data["id"],
-                    main.VirtualBetSubmission(outcome_key="player_1", stake=1001),
-                    predictor,
+            self._fund(db, self.predictor_id, 50000)
+            with patch(
+                "app.main._paystack_request",
+                side_effect=[
+                    {"recipient_code": "RCP_test"},
+                    {"status": "otp", "transfer_code": "TRF_test"},
+                ],
+            ):
+                withdrawal = main.request_wallet_withdrawal(
+                    main.WalletWithdrawalRequest(
+                        amount_kobo=10000,
+                        request_key="1234567890abcdef",
+                        account_name="Virtual Player",
+                        account_number="0123456789",
+                        bank_code="001",
+                    ),
+                    db.get(models.User, self.predictor_id),
                     db,
                 )
-            wallet = db.get(models.VirtualCreditWallet, self.predictor_id)
-
-        self.assertEqual(result.exception.status_code, 422)
-        self.assertEqual(wallet.balance, 1000)
-
-    def test_expired_round_closes_betting_and_reveals_historical_result(self):
-        with self.session_factory() as db:
-            self._seed_two_history_rows(db)
-            predictor = db.get(models.User, self.predictor_id)
-            round_data = main.get_virtual_games(predictor, db)["active_round"]
-            virtual_round = db.get(models.VirtualRound, round_data["id"])
-            virtual_round.closes_at = models.now() - timedelta(seconds=1)
-            db.commit()
-
-            with self.assertRaises(HTTPException) as result:
-                main.place_virtual_bet(
-                    round_data["id"],
-                    main.VirtualBetSubmission(outcome_key="player_1", stake=50),
-                    predictor,
-                    db,
+            row = db.scalar(
+                select(models.WalletWithdrawal).where(
+                    models.WalletWithdrawal.reference == withdrawal["reference"]
                 )
-            revealed = main.get_virtual_games(predictor, db)
-
-        self.assertEqual(result.exception.status_code, 409)
-        self.assertEqual(revealed["recent_rounds"][0]["result"], "Player A")
-        self.assertEqual(revealed["balance"], 1000)
-
-    def test_tied_historical_result_is_revealed_as_a_draw(self):
-        with self.session_factory() as db:
-            self._create_completed_chess(
-                db,
-                [self.player_a_id, self.player_b_id],
-                models.now() - timedelta(days=1),
             )
-            db.commit()
-            predictor = db.get(models.User, self.predictor_id)
-            round_data = main.get_virtual_games(predictor, db)["active_round"]
-            virtual_round = db.get(models.VirtualRound, round_data["id"])
-            virtual_round.closes_at = models.now() - timedelta(seconds=1)
-            db.commit()
+            self.assertEqual(main._wallet_balance(db, self.predictor_id), 40000)
+            self.assertEqual(main._wallet_balance(db, self.predictor_id, "locked"), 10000)
+            with patch(
+                "app.main._paystack_request",
+                return_value={"status": "success"},
+            ):
+                main.finalize_paystack_withdrawal(
+                    row.id,
+                    main.PaystackTransferOTP(otp="123456"),
+                    db.get(models.User, self.admin_id),
+                    db,
+                )
+            self.assertEqual(row.status, "success")
 
-            revealed = main.get_virtual_games(predictor, db)
+            payload = json.dumps({
+                "event": "transfer.reversed",
+                "data": {"reference": row.reference},
+            }).encode()
+            secret = "test-paystack-secret"
+            signature = hmac.new(secret.encode(), payload, hashlib.sha512).hexdigest()
 
-        self.assertEqual(revealed["recent_rounds"][0]["result"], "Draw / tie")
+            async def receive():
+                return {"type": "http.request", "body": payload, "more_body": False}
 
-    def test_no_completed_history_does_not_create_a_fake_round(self):
-        with self.session_factory() as db:
-            feed = main.get_virtual_games(db.get(models.User, self.predictor_id), db)
-            rounds = db.scalars(select(models.VirtualRound)).all()
+            request = Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/payments/paystack/webhook",
+                    "headers": [(b"x-paystack-signature", signature.encode())],
+                },
+                receive,
+            )
+            with patch.dict(os.environ, {"PAYSTACK_SECRET_KEY": secret}):
+                asyncio.run(main.paystack_webhook(request, db))
+                asyncio.run(main.paystack_webhook(request, db))
+            balance_after_reversals = main._wallet_balance(db, self.predictor_id)
+            withdrawal_status = row.status
 
-        self.assertIsNone(feed["active_round"])
-        self.assertEqual(rounds, [])
+        self.assertEqual(withdrawal_status, "reversed")
+        self.assertEqual(balance_after_reversals, 50000)
 
 
 if __name__ == "__main__":
