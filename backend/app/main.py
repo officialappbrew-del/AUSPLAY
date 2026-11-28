@@ -2648,6 +2648,7 @@ def get_virtual_games(
         ]
         db.commit()
     except IntegrityError:
+        logger.exception("Could not initialize virtual-game rounds")
         db.rollback()
         virtual_rounds = db.scalars(
             select(models.VirtualRound)
@@ -2655,7 +2656,7 @@ def get_virtual_games(
             .order_by(models.VirtualRound.game_id, models.VirtualRound.participant_count)
         ).all()
         if not virtual_rounds:
-            raise HTTPException(409, "A new virtual round could not be opened; refresh and try again")
+            raise HTTPException(500, "Virtual rounds could not be initialized; try again shortly")
 
     my_bets = {
         bet.round_id: bet
