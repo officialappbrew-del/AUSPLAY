@@ -152,7 +152,7 @@ class VirtualGameTests(unittest.TestCase):
                 player,
                 db,
             )
-            virtual_round.closes_at = models.now() - timedelta(seconds=1)
+            virtual_round.closes_at = models.now() - timedelta(seconds=16)
             db.commit()
             settled_feed = main.get_virtual_games(player, db)
             bet = db.scalar(
@@ -161,6 +161,10 @@ class VirtualGameTests(unittest.TestCase):
                     models.VirtualBet.user_id == self.predictor_id,
                 )
             )
+            demo_labels = {
+                option["key"]: option["label"]
+                for option in round_data["options"]
+            }
             wallet_balance = main._wallet_balance(db, self.predictor_id)
             locked_balance = main._wallet_balance(db, self.predictor_id, "locked")
             ledger_count = db.scalar(
@@ -171,6 +175,14 @@ class VirtualGameTests(unittest.TestCase):
 
         self.assertEqual(bet.payout_kobo, 0)
         self.assertEqual(settled_feed["recent_bets"][0]["status"], "demo_correct")
+        self.assertEqual(
+            settled_feed["recent_bets"][0]["outcome"],
+            demo_labels[bet.outcome_key],
+        )
+        self.assertEqual(
+            settled_feed["recent_rounds"][0]["result"],
+            demo_labels[virtual_round.outcome_key],
+        )
         self.assertEqual(wallet_balance, 0)
         self.assertEqual(locked_balance, 0)
         self.assertEqual(ledger_count or 0, 0)
@@ -179,12 +191,154 @@ class VirtualGameTests(unittest.TestCase):
         with self.session_factory() as db:
             feed = main.get_virtual_games(db.get(models.User, self.predictor_id), db)
 
-        self.assertEqual(len(feed["active_rounds"]), len(main.VIRTUAL_GAME_LABELS))
+        self.assertEqual(
+            len(feed["active_rounds"]),
+            len(main.VIRTUAL_GAME_LABELS) * main.VIRTUAL_SET_COUNT,
+        )
         self.assertEqual(
             {round_data["game_id"] for round_data in feed["active_rounds"]},
             set(main.VIRTUAL_GAME_LABELS),
         )
         self.assertTrue(all(round_data["is_demo"] for round_data in feed["active_rounds"]))
+        for game_id in main.VIRTUAL_GAME_LABELS:
+            game_rounds = [
+                round_data for round_data in feed["active_rounds"]
+                if round_data["game_id"] == game_id
+            ]
+            self.assertEqual(len(game_rounds), main.VIRTUAL_SET_COUNT)
+            self.assertEqual(
+                {round_data["slot_number"] for round_data in game_rounds},
+                set(range(1, main.VIRTUAL_SET_COUNT + 1)),
+            )
+        chess_round = next(
+            round_data for round_data in feed["active_rounds"]
+            if round_data["game_id"] == "chess"
+        )
+        expected_names = main.VIRTUAL_PLAYER_NAME_SETS[
+            (chess_round["id"] - 1) % len(main.VIRTUAL_PLAYER_NAME_SETS)
+        ]
+        self.assertEqual(
+            [option["label"] for option in chess_round["options"]],
+            [*expected_names[:2], "Draw / tie"],
+        )
+        self.assertFalse(chess_round["is_simulating"])
+        self.assertEqual(
+            (
+                main._as_utc(chess_round["simulation_ends_at"])
+                - main._as_utc(chess_round["closes_at"])
+            ).total_seconds(),
+            main.VIRTUAL_SIMULATION_SECONDS,
+        )
+
+    def test_round_locks_during_simulation_then_reveals_and_rotates_players(self):
+        with self.session_factory() as db:
+            player = db.get(models.User, self.predictor_id)
+            feed = main.get_virtual_games(player, db)
+            first_round = next(
+                item for item in feed["active_rounds"] if item["game_id"] == "chess"
+            )
+            first_names = [option["label"] for option in first_round["options"]]
+            virtual_round = db.get(models.VirtualRound, first_round["id"])
+            virtual_round.closes_at = models.now() - timedelta(seconds=1)
+            db.commit()
+
+            simulating_feed = main.get_virtual_games(player, db)
+            simulating_round = next(
+                item for item in simulating_feed["active_rounds"]
+                if item["game_id"] == "chess"
+            )
+            self.assertEqual(simulating_round["id"], first_round["id"])
+            self.assertTrue(simulating_round["is_simulating"])
+            self.assertEqual(virtual_round.status, "open")
+            with self.assertRaises(HTTPException) as result:
+                main.place_virtual_bet(
+                    virtual_round.id,
+                    main.VirtualBetSubmission(
+                        outcome_key="player_1",
+                        stake_kobo=0,
+                    ),
+                    player,
+                    db,
+                )
+            self.assertEqual(result.exception.status_code, 409)
+
+            virtual_round.closes_at = models.now() - timedelta(seconds=16)
+            db.commit()
+            revealed_feed = main.get_virtual_games(player, db)
+            next_round = next(
+                item for item in revealed_feed["active_rounds"]
+                if item["game_id"] == "chess"
+            )
+            revealed_result = next(
+                item for item in revealed_feed["recent_rounds"]
+                if item["id"] == first_round["id"]
+            )
+
+        self.assertNotEqual(next_round["id"], first_round["id"])
+        self.assertNotEqual(
+            [option["label"] for option in next_round["options"]],
+            first_names,
+        )
+        self.assertTrue(revealed_result["result"])
+
+    def test_fifteen_sets_use_distinct_historical_matches_when_available(self):
+        with self.session_factory() as db:
+            self._seed_completed_chess(db, count=10)
+            feed = main.get_virtual_games(
+                db.get(models.User, self.predictor_id),
+                db,
+            )
+            chess_rounds = [
+                item for item in feed["active_rounds"] if item["game_id"] == "chess"
+            ]
+            real_round_ids = [
+                round_data["id"] for round_data in chess_rounds
+                if not round_data["is_demo"]
+            ]
+            real_source_ids = db.scalars(
+                select(models.VirtualRound.source_game_id).where(
+                    models.VirtualRound.id.in_(real_round_ids)
+                )
+            ).all()
+
+        real_rounds = [round_data for round_data in chess_rounds if not round_data["is_demo"]]
+        sample_rounds = [round_data for round_data in chess_rounds if round_data["is_demo"]]
+        self.assertEqual(len(chess_rounds), main.VIRTUAL_SET_COUNT)
+        self.assertEqual(len(real_rounds), 10)
+        self.assertEqual(len(sample_rounds), 5)
+        self.assertEqual(len(set(real_source_ids)), len(real_rounds))
+
+    def test_all_fifteen_game_sets_are_revealed_and_retained(self):
+        with self.session_factory() as db:
+            player = db.get(models.User, self.predictor_id)
+            feed = main.get_virtual_games(player, db)
+            chess_rounds = [
+                item for item in feed["active_rounds"] if item["game_id"] == "chess"
+            ]
+            for round_data in chess_rounds:
+                virtual_round = db.get(models.VirtualRound, round_data["id"])
+                virtual_round.closes_at = models.now() - timedelta(seconds=16)
+            db.commit()
+
+            revealed_feed = main.get_virtual_games(player, db)
+            revealed_rounds = [
+                item for item in revealed_feed["recent_rounds"]
+                if item["game_id"] == "chess"
+            ]
+            retained_demos = db.scalar(
+                select(func.count(models.VirtualRound.id)).where(
+                    models.VirtualRound.is_demo.is_(True),
+                    models.VirtualRound.game_id == "chess",
+                    models.VirtualRound.status == "settled",
+                )
+            )
+
+        self.assertEqual(len(revealed_rounds), main.VIRTUAL_SET_COUNT)
+        self.assertEqual(
+            {round_data["slot_number"] for round_data in revealed_rounds},
+            set(range(1, main.VIRTUAL_SET_COUNT + 1)),
+        )
+        self.assertEqual(retained_demos, main.VIRTUAL_SET_COUNT)
 
     def test_public_catalogue_lists_games_and_actual_history_counts(self):
         with self.session_factory() as db:
@@ -334,11 +488,14 @@ class VirtualGameTests(unittest.TestCase):
             self.assertTrue(demo_round["is_demo"])
             self._seed_completed_chess(db, count=10)
 
+            demo_model = db.get(models.VirtualRound, demo_round["id"])
+            demo_model.closes_at = models.now() - timedelta(seconds=16)
+            db.commit()
             round_data = self._open_round(db)
             self.assertFalse(round_data["is_demo"])
             for _ in range(11):
                 current = db.get(models.VirtualRound, round_data["id"])
-                current.closes_at = models.now() - timedelta(seconds=1)
+                current.closes_at = models.now() - timedelta(seconds=16)
                 db.commit()
                 round_data = self._open_round(db)
                 self.assertFalse(round_data["is_demo"])
@@ -359,8 +516,8 @@ class VirtualGameTests(unittest.TestCase):
                 select(models.VirtualRound).where(models.VirtualRound.is_demo.is_(False))
             ).all()
 
-        self.assertEqual(chess_demo_count or 0, 0)
-        self.assertEqual(other_demo_count, 6)
+        self.assertEqual(chess_demo_count or 0, main.VIRTUAL_SET_COUNT)
+        self.assertEqual(other_demo_count, (len(main.VIRTUAL_GAME_LABELS) - 1) * main.VIRTUAL_SET_COUNT)
         self.assertGreater(len(real_rounds), 10)
 
     def test_pooled_prediction_pays_winner_and_records_ten_percent_commission_once(self):
@@ -385,7 +542,7 @@ class VirtualGameTests(unittest.TestCase):
                 db,
             )
             virtual_round = db.get(models.VirtualRound, round_data["id"])
-            virtual_round.closes_at = models.now() - timedelta(seconds=1)
+            virtual_round.closes_at = models.now() - timedelta(seconds=16)
             db.commit()
 
             feed = main.get_virtual_games(db.get(models.User, self.predictor_id), db)
@@ -425,7 +582,7 @@ class VirtualGameTests(unittest.TestCase):
                 db,
             )
             virtual_round = db.get(models.VirtualRound, round_data["id"])
-            virtual_round.closes_at = models.now() - timedelta(seconds=1)
+            virtual_round.closes_at = models.now() - timedelta(seconds=16)
             db.commit()
             main.get_virtual_games(db.get(models.User, self.predictor_id), db)
             balance = main._wallet_balance(db, self.predictor_id)

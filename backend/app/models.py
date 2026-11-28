@@ -181,6 +181,7 @@ class VirtualRound(Base):
             "uq_virtual_rounds_single_open",
             "game_id",
             "participant_count",
+            "slot_number",
             unique=True,
             postgresql_where=text("status = 'open'"),
             sqlite_where=text("status = 'open'"),
@@ -193,6 +194,7 @@ class VirtualRound(Base):
         ForeignKey("practice_rooms.id"), nullable=True
     )
     participant_count: Mapped[int] = mapped_column(Integer)
+    slot_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     outcome_key: Mapped[str] = mapped_column(String(16))
     odds: Mapped[dict[str, int]] = mapped_column(JSON)
     sample_size: Mapped[int] = mapped_column(Integer, default=0)

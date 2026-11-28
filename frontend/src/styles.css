@@ -97,39 +97,54 @@ section { padding-bottom:76px; scroll-margin-top:94px; }
 .prediction-points span,.prediction-summary > p { color:var(--muted); font-size:13px; }
 .prediction-points strong { color:var(--accent); font-size:28px; line-height:1.1; font-variant-numeric:tabular-nums; }
 .prediction-summary > p { flex:1; margin:0; }
-.virtual-game-catalogue,.virtual-round-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:14px; }
+.virtual-game-catalogue { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:14px; }
 .virtual-game-tile { display:grid; grid-template-columns:52px minmax(0,1fr); align-items:center; gap:14px; padding:16px; }
 .virtual-game-tile img { width:52px; height:52px; object-fit:cover; border-radius:10px; }
 .virtual-game-tile h3 { margin:0 0 4px; font-size:16px; }
 .virtual-game-tile p { margin:5px 0 2px; color:var(--muted); font-size:12px; }
 .virtual-game-tile small { color:var(--muted); font-size:11px; line-height:1.4; }
-.demo-label,.historical-label { display:inline-block; font-size:11px; font-weight:700; }
-.demo-label { color:var(--warning); }
+.practice-label,.historical-label { display:inline-block; font-size:11px; font-weight:700; }
+.practice-label { color:var(--warning); }
 .historical-label { color:var(--success); }
-.prediction-card { display:flex; max-width:none; min-width:0; flex-direction:column; gap:14px; padding:20px; }
-.prediction-card-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-.prediction-game { color:var(--accent); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-.prediction-card h3 { margin:4px 0 0; overflow-wrap:anywhere; font-size:18px; }
-.prediction-timer { display:grid; flex:0 0 auto; gap:2px; text-align:right; }
-.prediction-timer span { color:var(--accent); font-size:24px; font-variant-numeric:tabular-nums; font-weight:800; }
-.prediction-timer small { color:var(--muted); font-size:11px; }
-.prediction-card fieldset { display:grid; gap:8px; margin:0; border:0; padding:0; }
-.prediction-card legend { margin-bottom:6px; color:var(--text); font-size:13px; font-weight:700; }
-.prediction-option { display:flex; flex-direction:row; align-items:center; gap:9px; min-height:44px; border:1px solid var(--border); border-radius:8px; padding:7px 10px; cursor:pointer; }
-.prediction-option.selected { border-color:var(--accent); background:#f8bb3d0d; color:var(--text); }
-.prediction-option input { width:16px; height:16px; min-height:0; margin:0; accent-color:var(--accent); }
-.prediction-option span { flex:1; overflow-wrap:anywhere; }
-.prediction-option strong { color:var(--accent); font-size:13px; font-variant-numeric:tabular-nums; }
-.prediction-lock-note { margin:0 !important; color:var(--muted); font-size:12px; line-height:1.5; }
-.prediction-stake { display:grid; gap:6px; color:var(--text); font-size:13px; font-weight:700; }
-.prediction-stake input { max-width:220px; }
+.virtual-game-selector { display:grid; gap:12px; }
+.prediction-game-tabs { display:flex; flex-wrap:wrap; gap:8px; }
+.prediction-game-tab { display:flex; align-items:center; gap:8px; min-height:40px; border:1px solid var(--border); border-radius:9px; padding:7px 12px; background:var(--surface); color:var(--muted); font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+.prediction-game-tab.selected { border-color:var(--accent); background:#f8bb3d0d; color:var(--text); }
+.prediction-game-tab small { display:grid; min-width:20px; min-height:20px; place-items:center; border-radius:999px; padding:0 5px; background:var(--border); color:var(--text); font-size:10px; }
+.virtual-game-tab-panel { min-width:0; }
+.virtual-game-table-card { max-width:none; min-width:0; padding:16px; }
+.virtual-game-table-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.virtual-game-table-heading .eyebrow { margin:0 0 3px; }
+.virtual-game-table-heading h3 { margin:0; font-size:18px; }
+.virtual-game-table-heading > strong { color:var(--accent); font-size:13px; white-space:nowrap; }
+.virtual-game-table-scroll { max-width:100%; overflow-x:auto; border:1px solid var(--border); border-radius:10px; }
+.virtual-game-table { width:100%; min-width:920px; border-collapse:collapse; text-align:left; }
+.virtual-game-table th,.virtual-game-table td { border-bottom:1px solid var(--border); padding:10px; vertical-align:middle; }
+.virtual-game-table thead th { position:sticky; top:0; background:var(--surface); color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.virtual-game-table tbody tr:last-child > * { border-bottom:0; }
+.virtual-game-table tbody th { min-width:90px; color:var(--text); font-size:13px; }
+.virtual-game-table tbody th small { display:block; margin-top:3px; color:var(--muted); font-size:11px; font-weight:400; }
+.prediction-table-outcomes { display:flex; flex-wrap:wrap; gap:6px; margin:0; border:0; padding:0; }
+.prediction-table-outcome { display:grid; grid-template-columns:16px minmax(0,1fr); align-items:center; gap:2px 6px; min-width:130px; min-height:42px; border:1px solid var(--border); border-radius:7px; padding:5px 7px; cursor:pointer; }
+.prediction-table-outcome.selected { border-color:var(--accent); background:#f8bb3d0d; }
+.prediction-table-outcome input { grid-row:span 2; width:16px; height:16px; min-height:0; margin:0; accent-color:var(--accent); }
+.prediction-table-outcome span { overflow-wrap:anywhere; font-size:12px; }
+.prediction-table-outcome small { color:var(--muted); font-size:10px; }
+.prediction-table-outcomes:disabled .prediction-table-outcome { cursor:not-allowed; opacity:.65; }
+.prediction-table-stake input { width:112px; min-height:40px; padding:0 8px; }
+.prediction-table-practice { color:var(--muted); font-size:12px; }
+.prediction-table-status { display:grid; min-width:145px; gap:5px; color:var(--muted); font-size:11px; }
+.prediction-table-status strong { color:var(--text); font-size:12px; }
+.prediction-table-status small { color:var(--success); }
+.prediction-simulation-track { height:7px; overflow:hidden; border-radius:999px; background:var(--border); }
+.prediction-simulation-track span { display:block; height:100%; border-radius:inherit; background:var(--accent); transition:width 1s linear; }
+.prediction-row-submit { min-width:120px; white-space:nowrap; }
 .wallet-withdrawal-form { display:grid; max-width:620px; gap:14px; margin-bottom:20px; padding:20px; }
 .wallet-funding-form { display:grid; max-width:620px; gap:14px; margin-bottom:20px; padding:20px; }
 .wallet-funding-form h3,.wallet-funding-form p { margin:0; }
 .wallet-funding-form p { color:var(--muted); font-size:13px; line-height:1.5; }
 .wallet-withdrawal-form h3,.wallet-withdrawal-form p { margin:0; }
 .wallet-withdrawal-form p { color:var(--muted); font-size:13px; line-height:1.5; }
-.prediction-submit { width:100%; margin-top:auto; }
 .prediction-empty { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .prediction-empty p { color:var(--muted); }
 .prediction-feedback { margin:8px 0 16px; }
@@ -474,7 +489,8 @@ footer { border-top:1px solid var(--border); padding:32px 0 48px; color:var(--mu
   .prediction-summary > p { flex-basis:100%; order:1; }
   .prediction-summary > .link { margin-left:auto; }
   .prediction-empty,.prediction-history-item { align-items:flex-start; flex-direction:column; }
-  .prediction-card { padding:16px; }
+  .virtual-game-table-card { padding:10px; }
+  .virtual-game-table th,.virtual-game-table td { padding:8px; }
   .prediction-result { text-align:left; }
   .prediction-history-item { gap:8px; }
   .dashboard-section { padding-bottom:36px; }

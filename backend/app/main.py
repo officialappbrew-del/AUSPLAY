@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete, func, literal, select, union_all, update
+from sqlalchemy import case, delete, func, literal, select, tuple_, union_all, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
@@ -2340,24 +2340,6 @@ def _round_odds(records: list[dict], source: dict) -> tuple[dict[str, int], int]
     return odds, len(history)
 
 
-def _delete_demo_rounds(db: Session, game_id: str) -> None:
-    demo_round_ids = select(models.VirtualRound.id).where(
-        models.VirtualRound.is_demo.is_(True),
-        models.VirtualRound.game_id == game_id,
-    )
-    db.execute(
-        delete(models.VirtualBet).where(
-            models.VirtualBet.round_id.in_(demo_round_ids)
-        )
-    )
-    db.execute(
-        delete(models.VirtualRound).where(
-            models.VirtualRound.is_demo.is_(True),
-            models.VirtualRound.game_id == game_id,
-        )
-    )
-
-
 def _settle_virtual_round(db: Session, virtual_round: models.VirtualRound) -> None:
     if virtual_round.status != "open":
         return
@@ -2373,6 +2355,8 @@ def _settle_virtual_round(db: Session, virtual_round: models.VirtualRound) -> No
             bet.updated_at = now
         virtual_round.status = "settled"
         virtual_round.settled_at = now
+        db.flush()
+        _prune_settled_demo_rounds(db, virtual_round.game_id)
         return
     winning_bets = [
         bet for bet in bets if bet.outcome_key == virtual_round.outcome_key
@@ -2422,15 +2406,52 @@ def _settle_virtual_round(db: Session, virtual_round: models.VirtualRound) -> No
     virtual_round.settled_at = now
 
 
+def _prune_settled_demo_rounds(db: Session, game_id: str) -> None:
+    retained_round_ids = (
+        select(models.VirtualRound.id)
+        .where(
+            models.VirtualRound.is_demo.is_(True),
+            models.VirtualRound.game_id == game_id,
+            models.VirtualRound.status == "settled",
+        )
+        .order_by(
+            models.VirtualRound.settled_at.desc(),
+            models.VirtualRound.id.desc(),
+        )
+        .limit(VIRTUAL_SET_COUNT)
+    )
+    expired_round_ids = (
+        select(models.VirtualRound.id)
+        .where(
+            models.VirtualRound.is_demo.is_(True),
+            models.VirtualRound.game_id == game_id,
+            models.VirtualRound.status == "settled",
+            models.VirtualRound.id.not_in(retained_round_ids),
+        )
+    )
+    db.execute(
+        delete(models.VirtualBet).where(
+            models.VirtualBet.round_id.in_(expired_round_ids)
+        )
+    )
+    db.execute(
+        delete(models.VirtualRound).where(
+            models.VirtualRound.id.in_(expired_round_ids)
+        )
+    )
+
+
 def _public_virtual_round(
     virtual_round: models.VirtualRound,
     my_bet: models.VirtualBet | None,
 ) -> dict:
-    letters = ["A", "B", "C", "D"]
+    closes_at = _as_utc(virtual_round.closes_at)
+    simulation_ends_at = closes_at + timedelta(seconds=VIRTUAL_SIMULATION_SECONDS)
+    now = _as_utc(models.now())
     options = [
         {
             "key": f"player_{index}",
-            "label": f"Player {letters[index - 1]}",
+            "label": _virtual_player_label(index, virtual_round),
             "historical_odds_milli": virtual_round.odds.get(f"player_{index}"),
         }
         for index in range(1, virtual_round.participant_count + 1)
@@ -2443,11 +2464,14 @@ def _public_virtual_round(
     return {
         "id": virtual_round.id,
         "game_id": virtual_round.game_id,
+        "slot_number": virtual_round.slot_number,
         "is_demo": virtual_round.is_demo,
         "participant_count": virtual_round.participant_count,
         "sample_size": virtual_round.sample_size,
         "opened_at": virtual_round.opened_at,
         "closes_at": virtual_round.closes_at,
+        "simulation_ends_at": simulation_ends_at,
+        "is_simulating": closes_at <= now < simulation_ends_at,
         "options": options,
         "my_bet": (
             {
@@ -2459,7 +2483,22 @@ def _public_virtual_round(
     }
 
 
-def _virtual_outcome_label(outcome_key: str) -> str:
+def _virtual_player_label(
+    player_number: int,
+    virtual_round: models.VirtualRound,
+) -> str:
+    if not 1 <= player_number <= 4:
+        raise RuntimeError(f"Invalid virtual-round player number: {player_number}")
+    username_set = VIRTUAL_PLAYER_NAME_SETS[
+        (virtual_round.id - 1) % len(VIRTUAL_PLAYER_NAME_SETS)
+    ]
+    return username_set[player_number - 1]
+
+
+def _virtual_outcome_label(
+    outcome_key: str,
+    virtual_round: models.VirtualRound,
+) -> str:
     if outcome_key == "draw":
         return "Draw / tie"
     if outcome_key.startswith("player_"):
@@ -2467,8 +2506,7 @@ def _virtual_outcome_label(outcome_key: str) -> str:
             player_number = int(outcome_key.removeprefix("player_"))
         except ValueError as exc:
             raise RuntimeError(f"Invalid virtual-round outcome: {outcome_key}") from exc
-        if 1 <= player_number <= 4:
-            return f"Player {['A', 'B', 'C', 'D'][player_number - 1]}"
+        return _virtual_player_label(player_number, virtual_round)
     raise RuntimeError(f"Invalid virtual-round outcome: {outcome_key}")
 
 
@@ -2476,35 +2514,38 @@ def _open_or_rotate_virtual_round(
     db: Session,
     game_id: str,
     participant_count: int,
+    slot_number: int,
     records: list[dict],
+    virtual_round: models.VirtualRound | None,
 ) -> models.VirtualRound:
     history = [
         record for record in records
         if record["game_id"] == game_id
         and record["participant_count"] == participant_count
     ]
-    virtual_round = db.scalar(
-        select(models.VirtualRound)
-        .where(
+    if virtual_round is not None:
+        simulation_ends_at = (
+            _as_utc(virtual_round.closes_at)
+            + timedelta(seconds=VIRTUAL_SIMULATION_SECONDS)
+        )
+        if simulation_ends_at > _as_utc(models.now()):
+            return virtual_round
+        _settle_virtual_round(db, virtual_round)
+
+    db.flush()
+    open_source_ids = set(db.scalars(
+        select(models.VirtualRound.source_game_id).where(
             models.VirtualRound.status == "open",
+            models.VirtualRound.is_demo.is_(False),
             models.VirtualRound.game_id == game_id,
             models.VirtualRound.participant_count == participant_count,
         )
-        .with_for_update()
-    )
-    if virtual_round is not None:
-        if virtual_round.is_demo:
-            if len(history) >= 10:
-                _delete_demo_rounds(db, game_id)
-                virtual_round = None
-            elif _as_utc(virtual_round.closes_at) > _as_utc(models.now()):
-                return virtual_round
-        elif _as_utc(virtual_round.closes_at) > _as_utc(models.now()):
-            return virtual_round
-    if virtual_round is not None:
-        _settle_virtual_round(db, virtual_round)
-
-    if len(history) >= 10:
+    ).all())
+    available_history = [
+        record for record in history
+        if record["source_game_id"] not in open_source_ids
+    ]
+    if len(history) >= 10 and available_history:
         source_usage_counts = {
             source_game_id: count
             for source_game_id, count in db.execute(
@@ -2521,7 +2562,7 @@ def _open_or_rotate_virtual_round(
             ).all()
         }
         source = min(
-            history,
+            available_history,
             key=lambda record: (
                 source_usage_counts.get(record["source_game_id"], 0),
                 _as_utc(record["updated_at"]),
@@ -2533,13 +2574,14 @@ def _open_or_rotate_virtual_round(
             source_game_id=source["source_game_id"],
             source_room_id=source["source_room_id"],
             participant_count=source["participant_count"],
+            slot_number=slot_number,
             outcome_key=source["outcome_key"],
             odds=odds,
             sample_size=sample_size,
             is_demo=False,
             status="open",
             opened_at=models.now(),
-            closes_at=models.now() + timedelta(seconds=60),
+            closes_at=models.now() + timedelta(seconds=VIRTUAL_BETTING_SECONDS),
         )
     else:
         prior_demo_ids = db.scalars(
@@ -2559,13 +2601,14 @@ def _open_or_rotate_virtual_round(
             source_game_id=next_demo_id,
             source_room_id=None,
             participant_count=participant_count,
+            slot_number=slot_number,
             outcome_key=demo_outcomes[secrets.randbelow(len(demo_outcomes))],
             odds=odds,
             sample_size=0,
             is_demo=True,
             status="open",
             opened_at=models.now(),
-            closes_at=models.now() + timedelta(seconds=60),
+            closes_at=models.now() + timedelta(seconds=VIRTUAL_BETTING_SECONDS),
         )
     db.add(virtual_round)
     db.flush()
@@ -2581,6 +2624,29 @@ VIRTUAL_GAME_LABELS = {
     "snooker": "Snooker",
     "whot": "Whot",
 }
+
+VIRTUAL_BETTING_SECONDS = 60
+VIRTUAL_SIMULATION_SECONDS = 15
+VIRTUAL_SET_COUNT = 15
+VIRTUAL_PLAYER_NAME_SETS = (
+    ("Ayo_Bello", "Chioma_23", "TundePlays", "Zara_Nwosu"),
+    ("IfeomaK", "Musa_Adamu", "KemiOjo", "ChukaPlays"),
+    ("Nneka_Arts", "Femi_Ade", "AmakaJ", "ObiPlays"),
+    ("Sade_O", "Emeka_12", "TobiCreates", "AdaoraM"),
+    ("Bisi_Johnson", "Kunle_88", "LadiPlays", "ChinyereC"),
+    ("Farouk_A", "DamiT", "UcheWins", "Amina_S"),
+    ("Tope_Ad", "ZainabM", "Ikechukwu9", "KosiPlays"),
+    ("EfeOkoro", "Wale_24", "BolanleP", "NnamdiJ"),
+    ("RukkyB", "SegunO", "Precious_7", "JidePlays"),
+    ("Temi_A", "ChikaN", "Kayode_9", "OnomePlays"),
+    ("HalimaB", "DeleT", "Uju_15", "FolaPlays"),
+    ("BodeK", "IretiO", "Chisom_8", "AkinP"),
+    ("Somto_A", "Remi_22", "AbdulM", "TeniPlays"),
+    ("NosaB", "MoyoO", "Gabriel_6", "AishaK"),
+    ("Ife_Dev", "Seyi_14", "NnekaP", "FemiPlays"),
+    ("Adaeze_3", "KelechiM", "Tola_88", "NuraP"),
+    ("Nkiru_9", "OlamideK", "IsmailA", "SimiPlays"),
+)
 
 
 @app.get("/virtual-games/catalogue")
@@ -2633,18 +2699,43 @@ def get_virtual_games(
         if count >= 10
     }
     eligible_games = {game_id for game_id, _ in eligible_pairs}
-    for game_id in eligible_games:
-        _delete_demo_rounds(db, game_id)
-    round_keys = sorted(eligible_pairs)
+    round_keys = [
+        (game_id, participant_count, slot_number)
+        for game_id, participant_count in sorted(eligible_pairs)
+        for slot_number in range(1, VIRTUAL_SET_COUNT + 1)
+    ]
     round_keys.extend(
-        (game_id, 2)
+        (game_id, 2, slot_number)
         for game_id in VIRTUAL_GAME_LABELS
         if game_id not in eligible_games
+        for slot_number in range(1, VIRTUAL_SET_COUNT + 1)
     )
+    existing_rounds = {
+        (round_row.game_id, round_row.participant_count, round_row.slot_number): round_row
+        for round_row in db.scalars(
+            select(models.VirtualRound)
+            .where(
+                models.VirtualRound.status == "open",
+                tuple_(
+                    models.VirtualRound.game_id,
+                    models.VirtualRound.participant_count,
+                    models.VirtualRound.slot_number,
+                ).in_(round_keys),
+            )
+            .with_for_update()
+        ).all()
+    }
     try:
         virtual_rounds = [
-            _open_or_rotate_virtual_round(db, game_id, participant_count, records)
-            for game_id, participant_count in round_keys
+            _open_or_rotate_virtual_round(
+                db,
+                game_id,
+                participant_count,
+                slot_number,
+                records,
+                existing_rounds.get((game_id, participant_count, slot_number)),
+            )
+            for game_id, participant_count, slot_number in round_keys
         ]
         db.commit()
     except IntegrityError:
@@ -2678,7 +2769,7 @@ def get_virtual_games(
         select(models.VirtualRound)
         .where(models.VirtualRound.status == "settled")
         .order_by(models.VirtualRound.settled_at.desc())
-        .limit(10)
+        .limit(VIRTUAL_SET_COUNT * len(VIRTUAL_GAME_LABELS))
     ).all()
     active_rounds = [
         _public_virtual_round(round_row, my_bets.get(round_row.id))
@@ -2694,10 +2785,11 @@ def get_virtual_games(
             {
                 "round_id": bet.round_id,
                 "game_id": round_row.game_id,
+                "slot_number": round_row.slot_number,
                 "is_demo": round_row.is_demo,
-                "outcome": _virtual_outcome_label(bet.outcome_key),
+                "outcome": _virtual_outcome_label(bet.outcome_key, round_row),
                 "result": (
-                    _virtual_outcome_label(round_row.outcome_key)
+                    _virtual_outcome_label(round_row.outcome_key, round_row)
                     if round_row.status == "settled" else None
                 ),
                 "stake_kobo": bet.stake_kobo,
@@ -2718,9 +2810,10 @@ def get_virtual_games(
             {
                 "id": round_row.id,
                 "game_id": round_row.game_id,
+                "slot_number": round_row.slot_number,
                 "game_name": VIRTUAL_GAME_LABELS.get(round_row.game_id, round_row.game_id.title()),
                 "participant_count": round_row.participant_count,
-                "result": _virtual_outcome_label(round_row.outcome_key),
+                "result": _virtual_outcome_label(round_row.outcome_key, round_row),
                 "is_demo": round_row.is_demo,
                 "settled_at": round_row.settled_at,
             }
@@ -2743,11 +2836,16 @@ def place_virtual_bet(
     )
     if virtual_round is None:
         raise HTTPException(404, "Virtual round not found")
-    if virtual_round.status != "open" or _as_utc(virtual_round.closes_at) <= _as_utc(models.now()):
-        if virtual_round.status == "open":
+    now = _as_utc(models.now())
+    closes_at = _as_utc(virtual_round.closes_at)
+    if virtual_round.status != "open" or closes_at <= now:
+        if (
+            virtual_round.status == "open"
+            and closes_at + timedelta(seconds=VIRTUAL_SIMULATION_SECONDS) <= now
+        ):
             _settle_virtual_round(db, virtual_round)
             db.commit()
-        raise HTTPException(409, "This virtual round is closed")
+        raise HTTPException(409, "Predictions are locked while this set is being simulated")
     if body.outcome_key not in virtual_round.odds:
         raise HTTPException(422, "Choose an outcome offered in this round")
     if virtual_round.is_demo:

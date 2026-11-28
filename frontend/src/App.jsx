@@ -1537,6 +1537,7 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
   });
   const [withdrawing, setWithdrawing] = useState(false);
   const [clock, setClock] = useState(Date.now());
+  const [selectedPredictionGame, setSelectedPredictionGame] = useState("");
 
   useEffect(() => {
     if (!session) {
@@ -1663,7 +1664,7 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
         stake_kobo: stakeKobo,
       });
       setMessage(round.is_demo
-        ? "Your demo pick is saved. It has no cash stake or payout."
+        ? "Your practice pick is saved. It has no cash stake or payout."
         : "Your prediction is saved. It will lock when the timer ends.");
       const [latest, latestWallet] = await Promise.all([
         api.getVirtualGames(session.token),
@@ -1758,6 +1759,154 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
   const virtualCatalogue = catalogue;
   const rounds = data?.active_rounds
     || (data?.active_round ? [data.active_round] : []);
+  const groupedRounds = rounds.reduce((grouped, round) => {
+    if (!grouped[round.game_id]) grouped[round.game_id] = [];
+    grouped[round.game_id].push(round);
+    return grouped;
+  }, {});
+  const roundGroups = Object.entries(groupedRounds).sort(([firstGame], [secondGame]) => (
+    (gameNames[firstGame] || firstGame).localeCompare(gameNames[secondGame] || secondGame)
+  ));
+  const activeRoundGroup = roundGroups.find(([gameId]) => (
+    gameId === selectedPredictionGame
+  )) || roundGroups[0] || null;
+
+  function movePredictionTab(event, currentIndex) {
+    let nextIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % roundGroups.length;
+    else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + roundGroups.length) % roundGroups.length;
+    } else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = roundGroups.length - 1;
+    else return;
+
+    event.preventDefault();
+    const [nextGameId] = roundGroups[nextIndex];
+    setSelectedPredictionGame(nextGameId);
+    document.getElementById(`prediction-game-tab-${nextGameId}`)?.focus();
+  }
+
+  function renderRoundRow(round, rowIndex) {
+    const outcomeKey = outcomes[round.id] || "";
+    const stake = stakes[round.id] || "10";
+    const closesAt = new Date(round.closes_at).getTime();
+    const simulationEndsAt = new Date(round.simulation_ends_at).getTime();
+    const isSimulating = clock >= closesAt;
+    const secondsRemaining = Math.max(
+      0,
+      Math.ceil(((isSimulating ? simulationEndsAt : closesAt) - clock) / 1000),
+    );
+    const simulationProgress = isSimulating
+      ? Math.min(100, Math.max(
+        0,
+        ((clock - closesAt) / (simulationEndsAt - closesAt)) * 100,
+      ))
+      : 0;
+    const lastResult = data?.recent_rounds.find((pastRound) => (
+      pastRound.game_id === round.game_id
+      && pastRound.participant_count === round.participant_count
+      && pastRound.slot_number === round.slot_number
+    ));
+    const maxStake = (
+      data.available_kobo + (round.my_bet?.stake_kobo || 0)
+    ) / 100;
+
+    return (
+      <tr key={round.id}>
+        <th scope="row">
+          <strong>{rowIndex + 1}</strong>
+          <small>{round.is_demo ? "Practice set" : `${round.participant_count} players`}</small>
+        </th>
+        <td>
+          <fieldset className="prediction-table-outcomes" disabled={isSimulating}>
+            <legend className="sr-only">Predict the result for set {round.slot_number}</legend>
+            {round.options.map((option) => (
+              <label
+                className={`prediction-table-outcome${outcomeKey === option.key ? " selected" : ""}`}
+                key={option.key}
+              >
+                <input
+                  type="radio"
+                  name={`virtual-round-${round.id}`}
+                  value={option.key}
+                  checked={outcomeKey === option.key}
+                  onChange={() => setOutcomes((current) => ({
+                    ...current,
+                    [round.id]: option.key,
+                  }))}
+                />
+                <span>{option.label}</span>
+                <small>
+                  {round.is_demo
+                    ? "Practice"
+                    : option.historical_odds_milli
+                      ? `${(100000 / option.historical_odds_milli).toFixed(1)}%`
+                      : "No history"}
+                </small>
+              </label>
+            ))}
+          </fieldset>
+        </td>
+        <td>
+          {round.is_demo ? (
+            <span className="prediction-table-practice">No cash stake</span>
+          ) : (
+            <label className="prediction-table-stake">
+              <span className="sr-only">Stake for set {round.slot_number} in NGN</span>
+              <input
+                type="number"
+                min="1"
+                max={maxStake}
+                step="0.01"
+                disabled={isSimulating}
+                value={stake}
+                onChange={(event) => setStakes((current) => ({
+                  ...current,
+                  [round.id]: event.target.value,
+                }))}
+              />
+            </label>
+          )}
+        </td>
+        <td>
+          <div className="prediction-table-status">
+            <strong>
+              {isSimulating
+                ? secondsRemaining > 0 ? `Simulation · ${secondsRemaining}s` : "Revealing result"
+                : `${secondsRemaining}s to lock`}
+            </strong>
+            {isSimulating && (
+              <div
+                className="prediction-simulation-track"
+                role="progressbar"
+                aria-label={`Set ${round.slot_number} simulation progress`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(simulationProgress)}
+                aria-valuetext={`${secondsRemaining} seconds until result reveal`}
+              >
+                <span style={{ width: `${simulationProgress}%` }} />
+              </div>
+            )}
+            {lastResult && <span>Previous result: {lastResult.result}</span>}
+            {round.my_bet && <small>Your pick is saved</small>}
+          </div>
+        </td>
+        <td>
+          <ActionButton
+            className="btn prediction-row-submit"
+            onClick={() => saveBet(round)}
+            disabled={saving || isSimulating || !outcomeKey}
+            loading={saving}
+          >
+            {round.is_demo
+              ? round.my_bet ? "Update practice pick" : "Practice pick"
+              : round.my_bet ? "Update prediction" : "Predict"}
+          </ActionButton>
+        </td>
+      </tr>
+    );
+  }
 
   return (
     <section className="predictions-section" id="predictions">
@@ -1789,8 +1938,8 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
                 />
                 <div>
                   <h3>{game.name}</h3>
-                  <span className={game.demo_only ? "demo-label" : "historical-label"}>
-                    {game.demo_only ? "Demo only · no money stakes" : "Historical rounds available"}
+                  <span className={game.demo_only ? "practice-label" : "historical-label"}>
+                    {game.demo_only ? "Practice only · no money stakes" : "Historical rounds available"}
                   </span>
                   <p>{game.completed_matches} completed AusPlay matches recorded</p>
                   <small>
@@ -1810,14 +1959,10 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
         <>
           <div className="prediction-summary">
             <div className="prediction-points">
-              <span>Available balance</span>
+              <span>Balance</span>
               <strong>{formatNaira(wallet?.available_kobo)}</strong>
             </div>
-            <div className="prediction-points">
-              <span>In play</span>
-              <strong>{formatNaira(wallet?.locked_kobo)}</strong>
-            </div>
-            <p>NGN funds are held in a platform wallet. Predictions require at least 10 completed matches for the same game and player count.</p>
+            <p>Stakes are deducted from your balance, and winnings are credited when results settle. Player names are fictional aliases. Practice picks have no cash stake or payout; only recorded matches accept NGN stakes.</p>
             <ActionButton className="btn" onClick={() => setFundingOpen((open) => !open)}>
               Fund wallet
             </ActionButton>
@@ -1978,103 +2123,69 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
           {message && <p className="success prediction-feedback" role="status">{message}</p>}
           {loading && !data ? (
             <p className="login-prompt" role="status">Loading virtual game...</p>
-          ) : rounds.length ? (
-            <div className="virtual-round-grid">
-              {rounds.map((round) => {
-                const outcomeKey = outcomes[round.id] || "";
-                const stake = stakes[round.id] || "10";
-                const secondsRemaining = Math.max(
-                  0,
-                  Math.ceil((new Date(round.closes_at).getTime() - clock) / 1000),
-                );
-                return (
-            <article className="card prediction-card" key={round.id}>
-              <div className="prediction-card-heading">
-                <div>
-                  <span className="prediction-game">
-                    {gameNames[round.game_id] || round.game_id}
-                  </span>
-                  <h3>{round.is_demo ? "Demo prediction round" : "Historical match prediction"}</h3>
-                </div>
-                <div
-                  className="prediction-timer"
-                  aria-label={`${secondsRemaining} seconds remaining in this round`}
-                >
-                  <span>{secondsRemaining}s</span>
-                  <small>{round.my_bet ? "Round closes in" : "Betting closes in"}</small>
-                </div>
-              </div>
-              <p className="prediction-lock-note">
-                {round.is_demo
-                  ? "DEMO ONLY — this sample result is not a recorded match. No NGN stakes or payouts are available."
-                  : `This result is from a completed match. Player labels are anonymous; this is not live play. ${round.sample_size} completed matches are in the same game and player-count pool.`}
-              </p>
-              <fieldset>
-                <legend>{round.is_demo ? "Sample outcomes" : "Choose an outcome"}</legend>
-                {round.options.map((option) => (
-                  <label
-                    className={`prediction-option${outcomeKey === option.key ? " selected" : ""}`}
-                    key={option.key}
-                  >
-                    <input
-                      type="radio"
-                      name={`virtual-round-${round.id}`}
-                      value={option.key}
-                      checked={outcomeKey === option.key}
-                      onChange={() => setOutcomes((current) => ({
-                        ...current,
-                        [round.id]: option.key,
-                      }))}
-                    />
-                    <span>{option.label}</span>
-                    <strong>
-                      {round.is_demo
-                        ? "Demo pick"
-                        : option.historical_odds_milli
-                          ? `${(100000 / option.historical_odds_milli).toFixed(1)}% historical`
-                          : "No history"}
-                    </strong>
-                  </label>
-                ))}
-              </fieldset>
-              {!round.is_demo && (
-                <>
-                  <label className="prediction-stake">
-                    Stake (NGN)
-                    <input
-                      type="number"
-                      min="1"
-                      max={(data.available_kobo + (round.my_bet?.stake_kobo || 0)) / 100}
-                      step="0.01"
-                      value={stake}
-                      onChange={(event) => setStakes((current) => ({
-                        ...current,
-                        [round.id]: event.target.value,
-                      }))}
-                    />
-                  </label>
-                  <p className="prediction-lock-note">
-                    Winners share the losing stakes proportionally. The platform retains 10% of losing stakes; returns are pooled and are not fixed odds.
-                  </p>
-                </>
-              )}
-              <ActionButton
-                className="btn prediction-submit"
-                onClick={() => saveBet(round)}
-                disabled={saving || secondsRemaining === 0 || !outcomeKey}
-                loading={saving}
+          ) : roundGroups.length ? (
+            <div className="virtual-game-selector">
+              <div
+                className="prediction-game-tabs"
+                role="tablist"
+                aria-label="Select a game prediction table"
               >
-                {round.is_demo
-                  ? round.my_bet ? "Update demo pick" : "Make demo pick"
-                  : round.my_bet ? "Update prediction" : "Place prediction"}
-              </ActionButton>
-            </article>
-                );
-              })}
+                {roundGroups.map(([gameId, gameRounds], index) => {
+                  const isSelected = gameId === activeRoundGroup[0];
+                  return (
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`prediction-game-tab-${gameId}`}
+                      aria-controls="prediction-game-panel"
+                      aria-selected={isSelected}
+                      tabIndex={isSelected ? 0 : -1}
+                      className={`prediction-game-tab${isSelected ? " selected" : ""}`}
+                      onClick={() => setSelectedPredictionGame(gameId)}
+                      onKeyDown={(event) => movePredictionTab(event, index)}
+                      key={gameId}
+                    >
+                      <span>{gameNames[gameId] || gameId}</span>
+                      <small>{gameRounds.length}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <div
+                className="virtual-game-tab-panel"
+                id="prediction-game-panel"
+                role="tabpanel"
+                aria-labelledby={`prediction-game-tab-${activeRoundGroup[0]}`}
+                tabIndex={0}
+              >
+                <section className="card virtual-game-table-card">
+                  <div className="virtual-game-table-heading">
+                    <div>
+                      <p className="eyebrow">PREDICTION BOARD</p>
+                      <h3>{gameNames[activeRoundGroup[0]] || activeRoundGroup[0]}</h3>
+                    </div>
+                    <strong>{activeRoundGroup[1].length} sets</strong>
+                  </div>
+                  <div className="virtual-game-table-scroll">
+                    <table className="virtual-game-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">S/No</th>
+                          <th scope="col">Choose an outcome</th>
+                          <th scope="col">Stake</th>
+                          <th scope="col">Round status / previous result</th>
+                          <th scope="col"><span className="sr-only">Submit pick</span></th>
+                        </tr>
+                      </thead>
+                      <tbody>{activeRoundGroup[1].map(renderRoundRow)}</tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
             </div>
           ) : data && !error ? (
             <p className="empty-state">
-              No unused completed matches are available for a virtual round yet.
+              No prediction sets are available right now. Refresh in a moment.
             </p>
           ) : null}
           {data?.recent_bets.length > 0 && (
@@ -2084,15 +2195,15 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
                 {data.recent_bets.map((bet) => (
                   <article className="prediction-history-item" key={bet.round_id}>
                     <div>
-                      <strong>{gameNames[bet.game_id] || bet.game_id}: {bet.is_demo ? "demo round" : "historical prediction"}</strong>
+                      <strong>{gameNames[bet.game_id] || bet.game_id}: {bet.is_demo ? "practice round" : "historical prediction"}</strong>
                       <span>Your pick: {bet.outcome}</span>
                       {bet.result && <span>Past result: {bet.result}</span>}
                     </div>
                     <div className={`prediction-result ${bet.status}`}>
                       <span>{bet.status === "pending"
                         ? "Awaiting reveal"
-                        : bet.status === "demo_correct" ? "Demo pick correct"
-                          : bet.status === "demo_missed" ? "Demo pick missed"
+                        : bet.status === "demo_correct" ? "Practice pick correct"
+                          : bet.status === "demo_missed" ? "Practice pick missed"
                             : bet.status === "won" ? "Won"
                               : bet.status === "refunded" ? "Refunded" : "Not this time"}</span>
                       {bet.is_demo ? (
@@ -2117,8 +2228,8 @@ function VirtualGamesWorkspace({ session, games, onLogin }) {
                 {data.recent_rounds.map((pastRound) => (
                   <article className="prediction-history-item" key={pastRound.id}>
                     <div>
-                      <strong>{pastRound.game_name} · {pastRound.is_demo ? "demo simulation" : "historical match"}</strong>
-                      <span>{pastRound.is_demo ? "Sample only; no money involved" : `${pastRound.participant_count} anonymous players`}</span>
+                      <strong>{pastRound.game_name} · {pastRound.is_demo ? "practice simulation" : "historical match"}</strong>
+                      <span>{pastRound.is_demo ? "Practice only; no money involved" : `${pastRound.participant_count} anonymous players`}</span>
                     </div>
                     <div className="prediction-result">
                       <span>Past result</span>
